@@ -347,6 +347,7 @@ export const Persis: React.FC<PersisProps> = ({ words, sentences }) => {
       <ShotChip />
       <Captions pages={pages} words={words} />
       <Audio src={staticFile('voice.wav')} />
+      <Audio src={staticFile('sfx.wav')} volume={0.85} />
     </AbsoluteFill>
   );
 };
