@@ -16,6 +16,7 @@ import {
   CAPTION_FRAMING,
   type CaptionPage,
   type CastMember,
+  HOOK,
   PERSIS_DURATION_IN_FRAMES,
   PERSIS_FPS,
   SHOTS,
@@ -25,14 +26,19 @@ import {
   buildCaptionPages,
   captionPageAt,
   cutDipAt,
+  easeInCubic,
+  easeOutCubic,
   expressionAt,
   getShotAt,
+  hookShakeAt,
   isCastVisible,
   keyed,
+  lerp,
   parseSentences,
   parseWords,
   sampleCamera,
   smoothstep,
+  windowEnvelope,
 } from './story';
 import { type ToonActor, createToonActor, visemeAt } from './toon';
 import { FilmPipeline, WorldKit, type WorldScene, buildWorld } from './worlds';
@@ -126,7 +132,7 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
   const scene = useThree((s) => s.scene);
   const manager = useMemo(() => new StageManager(), []);
   const film = useMemo(() => new FilmPipeline(width, height), [width, height]);
-  const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35 }), []);
+  const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35, roll: 0 }), []);
   const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0 });
 
   useLayoutEffect(() => {
@@ -146,6 +152,7 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
 
   // Layout effect: runs before <ThreeCanvas>' frame renderer calls advance().
   useLayoutEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
     const { shot, index, localFrame, progress } = getShotAt(frame);
     const stage = manager.get(index);
     manager.show(index);
@@ -155,19 +162,20 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
     sampleCamera(frame, sample);
     camera.position.copy(sample.position);
     camera.lookAt(sample.target);
-    if (camera instanceof THREE.PerspectiveCamera) {
-      camera.fov = sample.fov;
-      camera.near = 0.05;
-      camera.far = 260;
-      camera.updateProjectionMatrix();
-    }
+    camera.rotateZ(sample.roll);
+    camera.fov = sample.fov;
+    camera.near = 0.05;
+    camera.far = 260;
+    camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
 
-    stage.world.update({ frame, localFrame, progress, fps }, camera.position);
+    stage.world.update({ frame, localFrame, progress, fps, camera });
     for (const { member, actor } of stage.cast) {
       actor.mesh.visible = isCastVisible(member, progress);
       if (!actor.mesh.visible) continue;
       const speaking = member.speaking.some(([a, b]) => progress >= a && progress <= b);
+      const talkEnvelope = windowEnvelope(member.speaking, progress);
+      const gesture = keyed(member.gesture ?? [[0, 0]], progress);
       actor.update(
         {
           frame,
@@ -175,7 +183,9 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
           viseme: visemeAt(words, frame, speaking),
           turn: keyed(member.turn ?? [[0, 0]], progress),
           nod: keyed(member.nod ?? [[0, 0]], progress),
-          gesture: keyed(member.gesture ?? [[0, 0]], progress),
+          gesture,
+          lean: Math.max(talkEnvelope * 0.65, gesture),
+          listening: 1 - talkEnvelope,
         },
         camera.position,
       );
@@ -206,15 +216,30 @@ function useCaptionFont(): void {
   const { delayRender, continueRender } = useDelayRender();
   const [handle] = useState(() => delayRender('Loading caption font'));
   useEffect(() => {
+    let resolved = false;
+    const done = (): void => {
+      if (!resolved) {
+        resolved = true;
+        continueRender(handle);
+      }
+    };
+    const timer = setTimeout(done, 1200);
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = FONT_CSS;
-    const done = (): void => continueRender(handle);
     link.onload = () => {
-      Promise.all([document.fonts.load(`800 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`), document.fonts.load('600 40px "Plus Jakarta Sans"')]).then(done, done);
+      if (document.fonts && document.fonts.load) {
+        Promise.all([
+          document.fonts.load(`800 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`),
+          document.fonts.load('600 40px "Plus Jakarta Sans"')
+        ]).then(done, done);
+      } else {
+        done();
+      }
     };
     link.onerror = done;
     document.head.appendChild(link);
+    return () => clearTimeout(timer);
   }, [handle, continueRender]);
 }
 
@@ -275,9 +300,11 @@ const Captions: React.FC<{ pages: readonly CaptionPage[]; words: readonly WordTi
 
 const ShotChip: React.FC = () => {
   const frame = useCurrentFrame();
-  const { shot, localFrame } = getShotAt(frame);
+  const { shot, index, localFrame } = getShotAt(frame);
   const len = shot.to - shot.from;
-  const o = interpolate(localFrame, [10, 22, len - 22, len - 10], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  // The opening shot's chip waits until the hook title has cleared.
+  const start = index === 0 ? HOOK.outEnd - shot.from : 10;
+  const o = interpolate(localFrame, [start, start + 12, len - 22, len - 10], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   return (
     <div
       style={{
@@ -307,70 +334,102 @@ const ShotChip: React.FC = () => {
   );
 };
 
-const TitleCard: React.FC = () => {
+/**
+ * 0–3 s hook: teaser badge drops in, the title slams down at HOOK.impactFrame
+ * with a squash-and-bounce, a gold flash/aura, expanding rules and a shake.
+ */
+const HookTitle: React.FC = () => {
   const frame = useCurrentFrame();
-  const o = interpolate(frame, [8, 22, 125, 145], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  if (o <= 0) return null;
+  const { badgeIn, impactFrame: hit, holdUntil, outEnd } = HOOK;
+  if (frame >= outEnd) return null;
+  const d = frame - hit;
+  const out = smoothstep(holdUntil, outEnd, frame);
+  const shake = hookShakeAt(frame);
+  const sx = shake * 16 * Math.sin(frame * 2.9);
+  const sy = shake * 11 * Math.sin(frame * 3.7 + 1);
+  const rot = shake * 1.4 * Math.sin(frame * 2.6 + 1.3);
 
-  // Impact scale bounce on frame 16
-  const punch = interpolate(frame, [10, 16, 26], [1.32, 0.96, 1.0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  const lineWidth = interpolate(frame, [16, 34], [0, 360], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  const badgeOpacity = interpolate(frame, [8, 16], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  // Title: falls in from 2.6x over 7 frames, squashes on impact, then a damped bounce.
+  const fall = smoothstep(hit - 7, hit, frame);
+  const titleScale = d < 0 ? lerp(2.6, 1, easeInCubic(fall)) : 1 - 0.16 * Math.exp(-d / 4.5) * Math.cos(d * 0.9);
+  const titleOpacity = d < 0 ? fall : 1;
+  const squashY = d >= 0 ? 1 + 0.1 * Math.exp(-d / 3) * Math.cos(d * 1.2 + Math.PI) : 1;
+  const aura = d < 0 ? 0 : 0.5 + 0.5 * Math.exp(-d / 8) + 0.12 * Math.sin(frame * 0.25);
+  const flash = d < 0 ? 0 : 0.6 * Math.exp(-d / 3);
+
+  const badgeT = easeOutCubic(smoothstep(badgeIn, badgeIn + 8, frame));
+  const badgeJolt = d >= 0 ? 1 + 0.06 * Math.exp(-d / 4) : 1;
+  const rule = easeOutCubic(smoothstep(hit, hit + 16, frame));
+  const ruleWidth = rule * (300 + 18 * Math.sin(frame * 0.18));
 
   return (
-    <AbsoluteFill style={{ alignItems: 'center', paddingTop: 290, fontFamily: FONT_FAMILY, opacity: o, pointerEvents: 'none' }}>
-      {/* Provocative Teaser Badge Hook */}
-      <div
+    <>
+      <AbsoluteFill style={{ pointerEvents: 'none', background: `radial-gradient(ellipse 80% 45% at 50% 32%, rgba(255,236,170,${flash}) 0%, rgba(251,191,36,${flash * 0.4}) 40%, rgba(0,0,0,0) 75%)` }} />
+      <AbsoluteFill
         style={{
-          opacity: badgeOpacity,
-          padding: '6px 20px',
-          borderRadius: 24,
-          background: 'rgba(23, 12, 25, 0.88)',
-          border: '1px solid rgba(251, 191, 36, 0.65)',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(251, 191, 36, 0.3)',
-          fontWeight: 700,
-          fontSize: 22,
-          letterSpacing: '0.22em',
-          color: '#FDE68A',
-          marginBottom: 16,
-          backdropFilter: 'blur(8px)',
+          alignItems: 'center',
+          paddingTop: 300,
+          fontFamily: FONT_FAMILY,
+          pointerEvents: 'none',
+          opacity: 1 - out,
+          transform: `translate(${sx}px, ${sy - out * 40}px) rotate(${rot}deg) scale(${1 + out * 0.08})`,
         }}
       >
-        SATU PERTANYAAN MENGGUNCANG HINDIA BELANDA
-      </div>
-
-      <div style={{ fontWeight: 800, fontSize: 38, letterSpacing: '0.45em', color: CAPTION_FRAMING.highlight, textShadow: '0 4px 12px rgba(0, 0, 0, 0.8)' }}>
-        SEJARAH PERSIS
-      </div>
-
-      <div
-        style={{
-          marginTop: 10,
-          fontWeight: 900,
-          fontSize: 112,
-          lineHeight: 1,
-          color: '#FFF8E7',
-          WebkitTextStroke: '14px #170c19',
-          paintOrder: 'stroke fill',
-          textShadow: '0 0 40px rgba(251, 191, 36, 0.55), 0 10px 0 #170c19',
-          transform: `scale(${punch})`,
-        }}
-      >
-        Dalilnya Mana?
-      </div>
-
-      {/* Golden cinematic accent line */}
-      <div
-        style={{
-          marginTop: 18,
-          width: lineWidth,
-          height: 3,
-          borderRadius: 2,
-          background: 'linear-gradient(to right, transparent, #FBBF24, transparent)',
-          boxShadow: '0 0 12px #FBBF24',
-        }}
-      />
-    </AbsoluteFill>
+        <div
+          style={{
+            maxWidth: 880,
+            padding: '16px 30px',
+            borderRadius: 18,
+            textAlign: 'center',
+            fontWeight: 800,
+            fontSize: 32,
+            lineHeight: 1.25,
+            letterSpacing: `${lerp(0.4, 0.12, badgeT)}em`,
+            color: '#FFF3D6',
+            background: 'linear-gradient(180deg, rgba(150,32,32,0.92), rgba(98,18,28,0.92))',
+            border: `3px solid ${CAPTION_FRAMING.highlight}`,
+            boxShadow: `0 0 ${24 + aura * 24}px rgba(251,191,36,${0.25 + aura * 0.3}), 0 8px 0 rgba(23,12,25,0.85)`,
+            opacity: badgeT,
+            transform: `translateY(${(1 - badgeT) * -60}px) scale(${badgeJolt})`,
+          }}
+        >
+          {HOOK.teaser}
+        </div>
+        <div style={{ position: 'relative', marginTop: 44 }}>
+          <div
+            style={{
+              position: 'absolute',
+              inset: '-60px -80px',
+              borderRadius: '50%',
+              background: `radial-gradient(ellipse at center, rgba(251,191,36,${aura * 0.45}) 0%, rgba(251,191,36,0) 70%)`,
+              filter: 'blur(8px)',
+            }}
+          />
+          <div
+            style={{
+              position: 'relative',
+              fontWeight: 800,
+              fontSize: 128,
+              lineHeight: 1,
+              color: '#FFF6E2',
+              WebkitTextStroke: '13px #170c19',
+              paintOrder: 'stroke fill',
+              textShadow: `0 0 ${20 + aura * 50}px rgba(251,191,36,${0.35 + aura * 0.5}), 0 10px 0 rgba(23,12,25,0.9)`,
+              opacity: titleOpacity,
+              transform: `scale(${titleScale}, ${titleScale * squashY})`,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {HOOK.title}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 34, opacity: rule }}>
+          <div style={{ width: ruleWidth, height: 5, borderRadius: 3, background: `linear-gradient(90deg, rgba(251,191,36,0), ${CAPTION_FRAMING.highlight})` }} />
+          <div style={{ fontWeight: 800, fontSize: 34, letterSpacing: '0.38em', color: CAPTION_FRAMING.highlight, textShadow: '0 4px 0 #170c19', whiteSpace: 'nowrap' }}>{HOOK.kicker}</div>
+          <div style={{ width: ruleWidth, height: 5, borderRadius: 3, background: `linear-gradient(90deg, ${CAPTION_FRAMING.highlight}, rgba(251,191,36,0))` }} />
+        </div>
+      </AbsoluteFill>
+    </>
   );
 };
 
@@ -385,11 +444,11 @@ export const Persis: React.FC<PersisProps> = ({ words, sentences }) => {
       </ThreeCanvas>
       {/* Bottom scrim keeps captions legible over bright scenes. */}
       <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(10,8,28,0.72) 0%, rgba(10,8,28,0) 34%)', pointerEvents: 'none' }} />
-      <TitleCard />
+      <HookTitle />
       <ShotChip />
       <Captions pages={pages} words={words} />
       <Audio src={staticFile('voice.wav')} />
-      <Audio src={staticFile('sfx.wav')} volume={0.55} />
+      <Audio src={staticFile('sfx.wav')} />
     </AbsoluteFill>
   );
 };

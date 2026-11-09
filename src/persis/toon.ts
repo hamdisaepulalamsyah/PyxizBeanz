@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CharacterId, Expression, WordTiming } from './story';
-import { activeWordIndex, clamp01, lerp } from './story';
+import { activeWordIndex, clamp01, hash01, lerp, nodPulseAt } from './story';
 
 /**
  * Procedural Canvas2D bean-head cast for "Sejarah Persis". Each character is
@@ -214,6 +214,11 @@ export function blinkAt(frame: number, seed: number): number {
   return amount;
 }
 
+/** Main breathing rate (Hz): natural resting breath (~13 breaths/min), visible in short shots. */
+export const BREATH_HZ = 0.22;
+/** Side-to-side weight transfer rate (Hz). */
+const WEIGHT_SHIFT_HZ = 0.11;
+
 export interface ToonDrive {
   frame: number;
   expression: { from: Expression; to: Expression; mix: number };
@@ -221,6 +226,10 @@ export interface ToonDrive {
   turn: number;
   nod: number;
   gesture: number;
+  /** 0..1 expressive forward lean (speaking / raised dalil finger). */
+  lean: number;
+  /** 0..1 how much the character is listening to someone else (soft nods). */
+  listening: number;
 }
 
 interface Pose extends FacePreset {
@@ -230,8 +239,15 @@ interface Pose extends FacePreset {
   blink: number;
   viseme: Viseme;
   gesture: number;
+  /** Chest offset in px (negative = raised on inhale). */
   breath: number;
+  /** 0..1 inhale amount (shoulders widen). */
+  breathOpen: number;
   breathHead: number;
+  lean: number;
+  /** Whole-body weight shift pivoting at the feet. */
+  shiftX: number;
+  shiftRot: number;
   frame: number;
 }
 
@@ -243,27 +259,41 @@ function poseFor(drive: ToonDrive, seed: number): Pose {
   const f = drive.frame;
   const s = f / 30;
   const talking = drive.viseme.open > 0.05 ? 1 : 0;
+  const lean = clamp01(drive.lean);
+  const listenNod = clamp01(drive.listening) * nodPulseAt(f, seed);
   // Idle micro-motion; slightly livelier while talking.
   const sway = Math.sin(s * 0.8 + seed) * 0.04 + Math.sin(s * 2.1 + seed * 2) * 0.015 * (1 + talking);
   const turn = drive.turn + sway;
-  const bow = clamp01(mixKey('bow') + drive.nod * 0.6 + Math.max(0, Math.sin(s * 5.2 + seed)) * 0.05 * talking);
-  const phase = (f / 84) * Math.PI * 2 + seed;
+  const bow = clamp01(mixKey('bow') + drive.nod * 0.6 + listenNod * 0.45 + lean * 0.12 + Math.max(0, Math.sin(s * 5.2 + seed)) * 0.05 * talking);
+  // Inhale slightly quicker than exhale for a natural rhythm.
+  const bp = 2 * Math.PI * BREATH_HZ * s + seed;
+  const inhale = (p: number): number => 0.5 - 0.5 * Math.cos(p + 0.35 * Math.sin(p));
+  const breathOpen = inhale(bp);
+  const weight = Math.sin(2 * Math.PI * WEIGHT_SHIFT_HZ * s + seed * 1.7) + 0.35 * Math.sin(2 * Math.PI * WEIGHT_SHIFT_HZ * 2.3 * s + seed);
+  const shiftRot = weight * 0.011;
+  // Small seeded saccades keep the eyes alive between bigger looks.
+  const saccade = (hash01(seed + 53, Math.floor((f + seed * 7) / 38)) - 0.5) * 0.3;
   return {
     lid: mixKey('lid') + bow * 0.15,
-    browRaise: mixKey('browRaise') + drive.viseme.open * 0.12,
+    browRaise: mixKey('browRaise') + drive.viseme.open * 0.12 + lean * 0.15,
     browInner: mixKey('browInner'),
     browAsym: mixKey('browAsym'),
     smile: mixKey('smile'),
     bow,
     lookY: clamp01(mixKey('lookY') * 0.5 + 0.5 + bow * 0.25) * 2 - 1,
     turn,
-    tilt: turn * 0.07 + Math.sin(s * 0.6 + seed) * 0.02,
-    lookX: Math.max(-1, Math.min(1, turn * 1.7)),
+    // Head counter-balances the body shift so the eyes stay level.
+    tilt: turn * 0.07 + Math.sin(s * 0.6 + seed) * 0.02 - shiftRot * 0.6,
+    lookX: Math.max(-1, Math.min(1, turn * 1.7 + saccade)),
     blink: blinkAt(f, seed),
     viseme: drive.viseme,
     gesture: clamp01(drive.gesture),
-    breath: Math.sin(phase) * 2,
-    breathHead: Math.sin(phase - 0.45) * 2,
+    breath: -(breathOpen - 0.5) * 7,
+    breathOpen,
+    breathHead: -(inhale(bp - 0.5) - 0.5) * 5,
+    lean,
+    shiftX: weight * 6,
+    shiftRot,
     frame: f,
   };
 }
@@ -315,7 +345,7 @@ function strokeOutline(ctx: CanvasRenderingContext2D, width = OUTLINE): void {
 function drawBody(ctx: CanvasRenderingContext2D, look: CharacterLook, pose: Pose): void {
   const cx = HEAD_CX + pose.turn * 5;
   const top = TORSO_TOP + pose.breath + pose.bow * 6;
-  const breathScale = 1 + pose.breath * 0.003;
+  const breathScale = 1 + pose.breathOpen * 0.016;
 
   ctx.fillStyle = look.skinShade;
   ctx.fillRect(cx - 40, HEAD_CY + 150, 80, 80);
@@ -723,7 +753,7 @@ function drawHeadwear(ctx: CanvasRenderingContext2D, look: CharacterLook, pose: 
 
 function drawHead(ctx: CanvasRenderingContext2D, look: CharacterLook, pose: Pose, seed: number): void {
   const cx = HEAD_CX + pose.turn * 12;
-  const cy = HEAD_CY + pose.breathHead + pose.bow * 22;
+  const cy = HEAD_CY + pose.breathHead + pose.bow * 22 + pose.lean * 8;
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(pose.tilt);
@@ -805,6 +835,12 @@ export function paintCharacter(ctx: CanvasRenderingContext2D, look: CharacterLoo
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.setTransform(TEXTURE_SCALE, 0, 0, TEXTURE_SCALE, 0, 0);
+  // Weight shift + forward lean, pivoting at the feet (bottom centre).
+  const leanScale = 1 + pose.lean * 0.045;
+  ctx.translate(LW / 2 + pose.shiftX, LH);
+  ctx.rotate(pose.shiftRot);
+  ctx.scale(leanScale, leanScale);
+  ctx.translate(-LW / 2, -LH);
   drawBody(ctx, look, pose);
   drawHead(ctx, look, pose, seed);
   drawArm(ctx, look, pose);
@@ -914,26 +950,6 @@ export function createToonActor(id: CharacterId, options: { gradientMap: THREE.T
       texture.needsUpdate = true;
       lastKey = key;
     }
-
-    // Organic idle dynamics: natural breathing, weight shifting, and expressive lean
-    const breath = Math.sin(drive.frame * 0.08 + options.seed * 3) * 0.015;
-    const sway = Math.sin(drive.frame * 0.035 + options.seed * 7) * 0.008;
-    const gestureLean = (drive.gesture ?? 0) * 0.035;
-
-    if (mesh.userData.baseScale === undefined) {
-      mesh.userData.baseScale = mesh.scale.y || 1.0;
-    }
-    const bs = mesh.userData.baseScale as number;
-    mesh.scale.set(bs * (1 - breath * 0.4), bs * (1 + breath), bs);
-
-    if (mesh.userData.basePos === undefined) {
-      mesh.userData.basePos = mesh.position.clone();
-    }
-    const bp = mesh.userData.basePos as THREE.Vector3;
-    mesh.position.set(bp.x + sway, bp.y + Math.abs(breath) * 0.006, bp.z);
-    mesh.rotation.z = Math.sin(drive.frame * 0.035 + options.seed * 7) * 0.008;
-    mesh.rotation.x = gestureLean;
-
     mesh.getWorldPosition(world);
     const parentYaw = mesh.parent ? new THREE.Euler().setFromQuaternion(mesh.parent.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y : 0;
     mesh.rotation.y = Math.atan2(cam.x - world.x, cam.z - world.z) - parentYaw;
