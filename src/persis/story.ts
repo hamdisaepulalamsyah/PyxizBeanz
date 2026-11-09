@@ -416,8 +416,10 @@ export function sampleCamera(frame: number, out?: CameraSample): CameraSample {
   const fovKeys = shot.camera.map((k) => [k.t, k.fov] as const);
   sample.fov = keyed(fovKeys, progress);
   const s = frame / PERSIS_FPS;
-  sample.position.x += Math.sin(s * 0.9) * 0.012 + Math.sin(s * 2.3) * 0.004;
-  sample.position.y += Math.sin(s * 1.3 + 1) * 0.009;
+  // Subtle hook trailer impact vibration at frame 16 (title punch)
+  const hookShake = Math.exp(-Math.abs(frame - 16) / 4) * 0.035 * Math.sin(frame * 3.2);
+  sample.position.x += Math.sin(s * 0.9) * 0.012 + Math.sin(s * 2.3) * 0.004 + hookShake * 0.4;
+  sample.position.y += Math.sin(s * 1.3 + 1) * 0.009 + hookShake;
   sample.target.x += Math.sin(s * 0.7 + 2) * 0.01;
   return sample;
 }

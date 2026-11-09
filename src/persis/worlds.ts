@@ -4,6 +4,7 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import type { Vec3, WorldId } from './story';
 import { clamp01, easeOutCubic, lerp, smoothstep } from './story';
+import { createCrowdMember, type CrowdMember } from './crowd';
 
 /**
  * Three.js worlds for "Sejarah Persis: Dalilnya Mana?" plus the film pipeline
@@ -47,7 +48,8 @@ export interface WorldScene {
   anchors: Record<string, THREE.Vector3>;
   background: THREE.Color;
   fog: THREE.Fog;
-  update: (f: WorldFrame) => void;
+  update: (f: WorldFrame, camPos?: THREE.Vector3) => void;
+  dispose?: () => void;
 }
 
 // ── Shared toolkit ──────────────────────────────────────────────────────────
@@ -343,6 +345,45 @@ export class WorldKit {
     l.shadow.normalBias = 0.03;
     parent.add(l, l.target);
     return l;
+  }
+
+  /** Rising warm steam from a cup or boiler */
+  steam(parent: THREE.Object3D, pos: Vec3, count = 16, seed = 5): (frame: number) => void {
+    const rand = mulberry32(seed);
+    const posArr = new Float32Array(count * 3);
+    const speeds = new Float32Array(count);
+    const offsets = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      speeds[i] = 0.008 + rand() * 0.012;
+      offsets[i] = rand();
+      posArr[i * 3] = pos[0] + (rand() - 0.5) * 0.04;
+      posArr[i * 3 + 1] = pos[1];
+      posArr[i * 3 + 2] = pos[2] + (rand() - 0.5) * 0.04;
+    }
+    const geo = this.track(new THREE.BufferGeometry());
+    geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    const mat = this.track(
+      new THREE.PointsMaterial({
+        color: '#ffedd0',
+        size: 0.045,
+        map: this.radial(),
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    const pts = new THREE.Points(geo, mat);
+    parent.add(pts);
+    return (frame: number) => {
+      for (let i = 0; i < count; i++) {
+        const t = (((offsets[i] ?? 0) + frame * (speeds[i] ?? 0.01)) % 1);
+        posArr[i * 3] = pos[0] + Math.sin(frame * 0.05 + i) * 0.03 * t;
+        posArr[i * 3 + 1] = pos[1] + t * 0.45;
+        posArr[i * 3 + 2] = pos[2] + Math.cos(frame * 0.04 + i) * 0.03 * t;
+      }
+      geo.attributes.position!.needsUpdate = true;
+    };
   }
 
   dispose(): void {
@@ -708,19 +749,43 @@ function buildBandung1923(kit: WorldKit): WorldScene {
   kit.dualTone(g, { hemi: 1.1, key: PALETTE.moon, keyIntensity: 0.9, keyPos: [-12, 18, -30], keyTarget: [0, 0, -10], extent: 30 });
   const dust = kit.dust(g, [-4, 0.3, -26], [4, 5, 6], 380, '#ffd9a0', 0.05, 19);
 
+  // Foreground depth: swaying tree branch overhanging at camera start
+  const fgBranch = new THREE.Group();
+  fgBranch.position.set(2.4, 8.2, 12);
+  g.add(fgBranch);
+  kit.cyl(fgBranch, 0.08, 0.14, 3.2, [-0.8, -0.4, 0], '#3a2618', { rot: [0, 0, 0.75] });
+  for (let i = 0; i < 9; i++) {
+    const leaf = kit.mesh(fgBranch, new THREE.CircleGeometry(0.24, 6), '#1a2b1f', [-0.4 - i * 0.28 + (i % 2) * 0.12, -0.8 - i * 0.18, (i % 3) * 0.1], { ink: false });
+    leaf.rotation.z = i * 0.4;
+  }
+
+  // Living crowd: pedestrians, merchants, and villagers
+  const crowd: CrowdMember[] = [
+    createCrowdMember('pedestrian_caping', 101, { pos: [-3.4, 0.16, 4], scale: 1.05, walk: { axis: 'z', speed: 0.015, range: 24, dir: -1 } }),
+    createCrowdMember('pedestrian_peci', 102, { pos: [3.4, 0.16, -2], scale: 1.0, walk: { axis: 'z', speed: 0.012, range: 20, dir: -1 } }),
+    createCrowdMember('pedestrian_peci', 103, { pos: [-3.8, 0.16, -14], scale: 0.95 }),
+    createCrowdMember('pedestrian_caping', 104, { pos: [3.6, 0.16, -18], scale: 0.92 }),
+  ];
+  crowd.forEach((c) => g.add(c.mesh));
+
   return {
     id: 'bandung1923',
     group: g,
     anchors: { windowLeft: new THREE.Vector3(-0.42, 1.55, -25.15), windowRight: new THREE.Vector3(0.42, 1.55, -25.15) },
     background: new THREE.Color('#0d0d2a'),
     fog: new THREE.Fog('#14143a', 18, 95),
-    update: ({ frame }) => {
+    update: ({ frame }, camPos) => {
       const flick = 1 + Math.sin(frame * 0.7) * 0.05 + Math.sin(frame * 1.9 + 1) * 0.03;
       lampLights.forEach((l, i) => (l.intensity = (i === 2 ? 5 : 6) * (flick + i * 0.01)));
       glows.forEach((s, i) => (s.material.opacity = 0.8 + Math.sin(frame * 0.5 + i) * 0.05));
       lantern.intensity = 5 * (1 + Math.sin(frame * 0.9) * 0.08 + Math.sin(frame * 2.7) * 0.05);
       lanternGlow.material.opacity = 0.85 + Math.sin(frame * 0.9) * 0.08;
+      fgBranch.rotation.z = Math.sin(frame * 0.035) * 0.025;
+      crowd.forEach((c) => c.update(frame, camPos ?? new THREE.Vector3(0, 5, 0)));
       dust(frame);
+    },
+    dispose: () => {
+      crowd.forEach((c) => c.dispose());
     },
   };
 }
@@ -860,6 +925,28 @@ function buildLanggar(kit: WorldKit): WorldScene {
   kit.cyl(g, 0.05, 0.06, 0.08, [1.15, 0.5, -0.75], PALETTE.brass, { seg: 12 });
   const pelitaGlow = kit.glow(g, '#ffcf7a', 0.35, [1.15, 0.6, -0.75], 0.9);
 
+  // Steaming cups on the low teak table
+  kit.cyl(g, 0.045, 0.035, 0.08, [-0.48, 0.49, -0.65], '#f0e8d6', { seg: 12, ink: 10 });
+  kit.cyl(g, 0.045, 0.035, 0.08, [0.48, 0.49, -0.65], '#f0e8d6', { seg: 12, ink: 10 });
+  const steam1 = kit.steam(g, [-0.48, 0.54, -0.65], 14, 21);
+  const steam2 = kit.steam(g, [0.48, 0.54, -0.65], 14, 22);
+
+  // Hanging ceiling lantern swaying gently
+  const hangingLantern = new THREE.Group();
+  hangingLantern.position.set(0, 3.4, -0.6);
+  g.add(hangingLantern);
+  kit.cyl(hangingLantern, 0.01, 0.01, 0.9, [0, -0.45, 0], PALETTE.brass, { seg: 6, ink: false });
+  kit.box(hangingLantern, [0.26, 0.36, 0.26], [0, -1.0, 0], PALETTE.teakDark, { ink: 20 });
+  kit.glow(hangingLantern, PALETTE.lampGlow, 1.6, [0, -1.0, 0], 0.7);
+
+  // Faithful listening santri in Langgar
+  const crowd: CrowdMember[] = [
+    createCrowdMember('santri_listening', 201, { pos: [-2.2, 0.02, -0.7], scale: 0.95 }),
+    createCrowdMember('santri_listening', 202, { pos: [2.2, 0.02, -0.7], scale: 0.95 }),
+    createCrowdMember('santri_listening', 203, { pos: [-1.4, 0.02, -2.4], scale: 0.88 }),
+  ];
+  crowd.forEach((c) => g.add(c.mesh));
+
   g.add(new THREE.HemisphereLight(PALETTE.coolSky, PALETTE.coolGround, 0.9));
   const moon = new THREE.DirectionalLight(PALETTE.moon, 0.7);
   moon.position.set(4, 4, -9);
@@ -874,7 +961,7 @@ function buildLanggar(kit: WorldKit): WorldScene {
     anchors: { seatLeft: new THREE.Vector3(-0.72, -0.02, -1.5), seatRight: new THREE.Vector3(0.72, -0.02, -1.5) },
     background: new THREE.Color('#120d22'),
     fog: new THREE.Fog('#160f26', 7, 22),
-    update: ({ frame, progress }) => {
+    update: ({ frame, progress }, camPos) => {
       // Damped swing that settles level: both sources carry equal weight.
       const angle = 0.3 * Math.cos(progress * Math.PI * 2 * 3.2) * Math.exp(-progress * 5) + 0.02 * Math.sin(frame * 0.05) * (1 - smoothstep(0.5, 0.7, progress));
       beam.rotation.z = angle;
@@ -888,9 +975,17 @@ function buildLanggar(kit: WorldKit): WorldScene {
       key.intensity = 9 * flick;
       flame.material.opacity = 0.85 + (flick - 1) * 1.5;
       lantern.rotation.z = Math.sin(frame * 0.04) * 0.03;
+      hangingLantern.rotation.z = Math.sin(frame * 0.045) * 0.035;
+      hangingLantern.rotation.x = Math.cos(frame * 0.035) * 0.02;
       pelita.intensity = 1.6 * (1 + Math.sin(frame * 1.3 + 2) * 0.1);
       pelitaGlow.scale.setScalar(0.35 * (1 + Math.sin(frame * 1.7) * 0.08));
+      steam1(frame);
+      steam2(frame);
+      crowd.forEach((c) => c.update(frame, camPos ?? new THREE.Vector3(0, 1.5, 0)));
       dust(frame);
+    },
+    dispose: () => {
+      crowd.forEach((c) => c.dispose());
     },
   };
 }
@@ -985,9 +1080,20 @@ function buildHassanStudy(kit: WorldKit): WorldScene {
     { ink: false, shadow: false, rot: [0.33, 0, 0] },
   );
   cone.castShadow = false;
-  const spots: Vec3[] = [];
-  for (let r = 0; r < 3; r++) for (let i = 0; i < 6; i++) spots.push([2.3 + i * 0.6 + (r % 2) * 0.3, 0, 1.3 + r * 0.75]);
-  silhouetteCrowd(kit, g, spots, 71);
+  // Steaming cup on Hassan's study desk
+  kit.cyl(desk, 0.045, 0.035, 0.08, [-0.25, 0.81, -0.15], '#ece4d0', { seg: 12, ink: 10 });
+  const deskSteam = kit.steam(desk, [-0.25, 0.86, -0.15], 14, 33);
+
+  // Attentive debate listeners sitting in audience rows
+  const crowd: CrowdMember[] = [
+    createCrowdMember('debate_listener', 301, { pos: [2.6, 0.02, 1.3], scale: 0.95 }),
+    createCrowdMember('debate_listener', 302, { pos: [3.4, 0.02, 1.3], scale: 0.95 }),
+    createCrowdMember('debate_listener', 303, { pos: [4.2, 0.02, 1.3], scale: 0.95 }),
+    createCrowdMember('debate_listener', 304, { pos: [5.0, 0.02, 1.3], scale: 0.95 }),
+    createCrowdMember('debate_listener', 305, { pos: [3.0, 0.02, 2.1], scale: 0.92 }),
+    createCrowdMember('debate_listener', 306, { pos: [4.4, 0.02, 2.1], scale: 0.92 }),
+  ];
+  crowd.forEach((c) => g.add(c.mesh));
 
   kit.dualTone(g, { hemi: 1.7, key: '#ffcf8a', keyIntensity: 0.9, keyPos: [-6, 7, 5], keyTarget: [0, 0, -1], extent: 9 });
   const dust = kit.dust(g, [-6, 0.4, -3], [6, 4, 3], 360, '#ffd8a0', 0.025, 29);
@@ -998,7 +1104,7 @@ function buildHassanStudy(kit: WorldKit): WorldScene {
     anchors: { desk: new THREE.Vector3(-4, 0.22, -2.0), podium: new THREE.Vector3(4, 0.98, -1.3) },
     background: new THREE.Color('#120d22'),
     fog: new THREE.Fog('#170f28', 9, 26),
-    update: ({ frame, progress }) => {
+    update: ({ frame, progress }, camPos) => {
       const w = frame * 0.25;
       pen.position.set(0.32 + Math.sin(w) * 0.05 + progress * 0.08, 0.9 + Math.abs(Math.sin(w * 2)) * 0.01, 0.12 + Math.cos(w * 0.7) * 0.03);
       pen.rotation.set(0.5, 0, -0.5);
@@ -1007,7 +1113,12 @@ function buildHassanStudy(kit: WorldKit): WorldScene {
       lampGlow.material.opacity = 0.8 * flick;
       stageSpot.intensity = 14 * smoothstep(0.35, 0.6, progress);
       (cone.material as THREE.MeshBasicMaterial).opacity = smoothstep(0.35, 0.6, progress);
+      deskSteam(frame);
+      crowd.forEach((c) => c.update(frame, camPos ?? new THREE.Vector3(4, 2, 0)));
       dust(frame);
+    },
+    dispose: () => {
+      crowd.forEach((c) => c.dispose());
     },
   };
 }
@@ -1667,7 +1778,18 @@ function buildParliament(kit: WorldKit): WorldScene {
       crowd.push([x + Math.sin(a) * 0.3, 0, z + Math.cos(a) * 0.3]);
     }
   }
-  silhouetteCrowd(kit, g, crowd, 77);
+  // Seated parliament delegates listening to Mohammad Natsir
+  const delegates: CrowdMember[] = [
+    createCrowdMember('parliament_delegate', 701, { pos: [-2.8, 0.02, -0.6], scale: 0.95 }),
+    createCrowdMember('parliament_delegate', 702, { pos: [-1.4, 0.02, -0.3], scale: 0.95 }),
+    createCrowdMember('parliament_delegate', 703, { pos: [1.4, 0.02, -0.3], scale: 0.95 }),
+    createCrowdMember('parliament_delegate', 704, { pos: [2.8, 0.02, -0.6], scale: 0.95 }),
+    createCrowdMember('parliament_delegate', 705, { pos: [-3.8, 0.02, 1.3], scale: 0.92 }),
+    createCrowdMember('parliament_delegate', 706, { pos: [-2.2, 0.02, 1.6], scale: 0.92 }),
+    createCrowdMember('parliament_delegate', 707, { pos: [2.2, 0.02, 1.6], scale: 0.92 }),
+    createCrowdMember('parliament_delegate', 708, { pos: [3.8, 0.02, 1.3], scale: 0.92 }),
+  ];
+  delegates.forEach((d) => g.add(d.mesh));
 
   // The map of Indonesia on the back wall.
   const map = new THREE.Group();
@@ -1709,7 +1831,7 @@ function buildParliament(kit: WorldKit): WorldScene {
     anchors: { podium: new THREE.Vector3(0, 1.22, -3.45) },
     background: new THREE.Color('#141026'),
     fog: new THREE.Fog('#1a1430', 14, 40),
-    update: ({ frame, progress }) => {
+    update: ({ frame, progress }, camPos) => {
       const m = easeOutCubic(smoothstep(0.55, 0.88, progress));
       for (const p of pieces) {
         p.mesh.position.set(p.scatter.x * (1 - m), p.scatter.y * (1 - m), 0.06 + p.scatter.z * (1 - m));
@@ -1732,7 +1854,11 @@ function buildParliament(kit: WorldKit): WorldScene {
         }
         pos.needsUpdate = true;
       });
+      delegates.forEach((d) => d.update(frame, camPos ?? new THREE.Vector3(0, 2, 0)));
       dust(frame);
+    },
+    dispose: () => {
+      delegates.forEach((d) => d.dispose());
     },
   };
 }

@@ -1,11 +1,14 @@
 """Sound design cue sheet for Sejarah Persis: Dalilnya Mana?
 
-Pure procedural Foley, atmospheric, and kinetic sound design without background music.
-Calibrated with polite gains and mastered to -22.0 LUFS so narration stays 100% clear.
+Enriched procedural Foley, atmospheric beds, and kinetic sound design without background music.
+Mastered to -22.0 LUFS so narration stays crystal clear while world feels alive.
 """
 
 from sfx.synth import click, pop, whoosh, riser, chime
 from sfx.persis_synth import (
+    hook_title_slam,
+    teacup_clink,
+    birds_morning_bandung,
     wind_breeze,
     carriage_hooves,
     page_turn,
@@ -24,18 +27,20 @@ from sfx.persis_synth import (
 
 DURATION = 78.916
 OUT = "public/sfx.wav"
-TARGET_LUFS = -22.0  # Polite background level to ensure voice narration is always crystal clear
+TARGET_LUFS = -22.0
 
 
 def score(mix, tl=None):
     put = mix.put
 
     # ── SHOT 1: BANDUNG 1923 (0.0s - 9.83s) ───────────────────────────────────
-    # Opening subtle entry into colonial Bandung
-    put(0.05, whoosh(1.1, 160, 2200, peak=0.35), gain=0.10)
+    # Opening cinematic entry & punchy hook at frame 16 (0.53s)
+    put(0.02, whoosh(0.55, 180, 2200, peak=0.35), gain=0.10)
+    put(0.53, hook_title_slam(2.0), gain=0.18)  # Trailer punch on "Dalilnya Mana?"
     put(0.2, wind_breeze(9.5, fc=380), gain=0.04)
-    put(0.48, pop(420, 850), gain=0.10, pan=-0.4)  # Chip reveal
-    put(1.0, carriage_hooves(count=14, tempo=0.42), gain=0.08, pan=-0.2)  # Cobblestone street
+    put(0.8, birds_morning_bandung(8.0), gain=0.08, pan=0.3)  # Peaceful Priangan birds
+    put(0.48, pop(420, 850), gain=0.09, pan=-0.4)  # Chip reveal
+    put(1.2, carriage_hooves(count=14, tempo=0.42), gain=0.08, pan=-0.2)  # Cobblestone street
     # Question setup "Dalilnya mana?"
     put(8.3, click(1600), gain=0.06)
     # Transition dip to Langgar
@@ -44,6 +49,7 @@ def score(mix, tl=None):
     # ── SHOT 2: LANGGAR, BANDUNG (9.83s - 24.50s) ────────────────────────────
     put(9.85, click(2100), gain=0.08, pan=-0.4)  # Chip reveal
     put(10.0, wind_breeze(14.2, fc=320), gain=0.03)  # Langgar acoustic breeze
+    put(11.2, teacup_clink(), gain=0.12, pan=-0.2)  # Teacup clink on low table
     # Zamzam & Yunus dialogue & scale of dalil
     put(13.8, scale_tilt(1.2), gain=0.08, pan=-0.2)
     # "Setiap amalan ditimbang dengan Al-Qur'an dan Sunnah"
@@ -57,6 +63,7 @@ def score(mix, tl=None):
     # ── SHOT 3: AHMAD HASSAN STUDY & DEBATE (24.50s - 33.00s) ─────────────────
     put(24.55, pop(480, 1050), gain=0.09, pan=-0.4)  # Chip reveal
     put(24.8, wind_breeze(8.0, fc=290), gain=0.03)
+    put(25.4, teacup_clink(), gain=0.10, pan=-0.3)  # Teacup on study desk
     # Ahmad Hassan writes answers to the community
     put(28.3, quill_write(2.3), gain=0.09, pan=-0.2)
     put(29.7, page_turn(0.48), gain=0.08, pan=-0.1)
@@ -68,7 +75,7 @@ def score(mix, tl=None):
 
     # ── SHOT 4: PERCETAKAN MAJALAH PEMBELA ISLAM (33.00s - 41.00s) ───────────
     put(33.05, pop(450, 920), gain=0.09, pan=-0.4)
-    # 1929 Mechanical letterpress printing press (calibrated down to background rhythm)
+    # 1929 Mechanical letterpress printing press rhythm
     put(33.15, printing_press_mechanical(7.7), gain=0.10, pan=0.1)
     # Transition dip across the sea to Flores
     put(40.4, whoosh(0.75, 300, 2800, peak=0.6), gain=0.12)

@@ -163,7 +163,7 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
     }
     camera.updateMatrixWorld();
 
-    stage.world.update({ frame, localFrame, progress, fps });
+    stage.world.update({ frame, localFrame, progress, fps }, camera.position);
     for (const { member, actor } of stage.cast) {
       actor.mesh.visible = isCastVisible(member, progress);
       if (!actor.mesh.visible) continue;
@@ -309,25 +309,67 @@ const ShotChip: React.FC = () => {
 
 const TitleCard: React.FC = () => {
   const frame = useCurrentFrame();
-  const o = interpolate(frame, [14, 30, 120, 140], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const o = interpolate(frame, [8, 22, 125, 145], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   if (o <= 0) return null;
+
+  // Impact scale bounce on frame 16
+  const punch = interpolate(frame, [10, 16, 26], [1.32, 0.96, 1.0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const lineWidth = interpolate(frame, [16, 34], [0, 360], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const badgeOpacity = interpolate(frame, [8, 16], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+
   return (
-    <AbsoluteFill style={{ alignItems: 'center', paddingTop: 330, fontFamily: FONT_FAMILY, opacity: o, pointerEvents: 'none' }}>
-      <div style={{ fontWeight: 800, fontSize: 40, letterSpacing: '0.42em', color: CAPTION_FRAMING.highlight, textShadow: '0 4px 0 #170c19' }}>SEJARAH PERSIS</div>
+    <AbsoluteFill style={{ alignItems: 'center', paddingTop: 290, fontFamily: FONT_FAMILY, opacity: o, pointerEvents: 'none' }}>
+      {/* Provocative Teaser Badge Hook */}
       <div
         style={{
-          marginTop: 14,
-          fontWeight: 800,
-          fontSize: 108,
+          opacity: badgeOpacity,
+          padding: '6px 20px',
+          borderRadius: 24,
+          background: 'rgba(23, 12, 25, 0.88)',
+          border: '1px solid rgba(251, 191, 36, 0.65)',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(251, 191, 36, 0.3)',
+          fontWeight: 700,
+          fontSize: 22,
+          letterSpacing: '0.22em',
+          color: '#FDE68A',
+          marginBottom: 16,
+          backdropFilter: 'blur(8px)',
+        }}
+      >
+        SATU PERTANYAAN MENGGUNCANG HINDIA BELANDA
+      </div>
+
+      <div style={{ fontWeight: 800, fontSize: 38, letterSpacing: '0.45em', color: CAPTION_FRAMING.highlight, textShadow: '0 4px 12px rgba(0, 0, 0, 0.8)' }}>
+        SEJARAH PERSIS
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          fontWeight: 900,
+          fontSize: 112,
           lineHeight: 1,
-          color: '#FFF6E2',
-          WebkitTextStroke: '12px #170c19',
+          color: '#FFF8E7',
+          WebkitTextStroke: '14px #170c19',
           paintOrder: 'stroke fill',
-          transform: `scale(${1 + (1 - smoothstep(14, 34, frame)) * 0.08})`,
+          textShadow: '0 0 40px rgba(251, 191, 36, 0.55), 0 10px 0 #170c19',
+          transform: `scale(${punch})`,
         }}
       >
         Dalilnya Mana?
       </div>
+
+      {/* Golden cinematic accent line */}
+      <div
+        style={{
+          marginTop: 18,
+          width: lineWidth,
+          height: 3,
+          borderRadius: 2,
+          background: 'linear-gradient(to right, transparent, #FBBF24, transparent)',
+          boxShadow: '0 0 12px #FBBF24',
+        }}
+      />
     </AbsoluteFill>
   );
 };

@@ -9,6 +9,51 @@ import random
 from sfx.synth import SR, bandnoise, click, blip, pop, chime, whoosh, riser, impact, scratch
 
 
+def hook_title_slam(dur=2.2):
+    """Trailer hook punch for title card: sub boom + airy rush + brass chime."""
+    n = int(dur * SR)
+    out = []
+    for k in range(n):
+        t = k / SR
+        sub = math.sin(2 * math.pi * (46 + 35 * math.exp(-t / 0.09)) * t) * math.exp(-t / 0.42) * 1.3
+        sub = math.tanh(1.4 * sub)
+        thump = random.uniform(-1, 1) * math.exp(-t / 0.012) * 0.75
+        chime_ring = (math.sin(2 * math.pi * 587.3 * t) * 0.4 + math.sin(2 * math.pi * 1174.6 * t) * 0.25) * math.exp(-t / 0.8)
+        out.append((sub * 0.65 + thump * 0.35 + chime_ring * 0.3) * min(1.0, (dur - t) / 0.4))
+    return out
+
+
+def teacup_clink(dur=0.35):
+    """Delicate ceramic/porcelain teacup clink."""
+    n = int(dur * SR)
+    out = []
+    for k in range(n):
+        t = k / SR
+        ceramic = (math.sin(2 * math.pi * 2350 * t) * 0.7 + math.sin(2 * math.pi * 3820 * t) * 0.4) * math.exp(-t / 0.045)
+        click_tap = random.uniform(-1, 1) * math.exp(-t / 0.003) * 0.5
+        out.append(ceramic + click_tap)
+    return out
+
+
+def birds_morning_bandung(dur=8.0):
+    """Quiet distant birds chirping in mountain valley."""
+    n = int(dur * SR)
+    out = [0.0] * n
+    chirp_times = [0.8, 2.4, 4.8, 6.2]
+    for ct in chirp_times:
+        k0 = int(ct * SR)
+        dur_c = 0.22
+        nc = int(dur_c * SR)
+        for j in range(nc):
+            idx = k0 + j
+            if idx < n:
+                tj = j / SR
+                freq = 2800 + 800 * math.sin(2 * math.pi * 8 * tj)
+                tone = math.sin(2 * math.pi * freq * tj) * math.sin(math.pi * tj / dur_c) ** 2
+                out[idx] += tone * 0.14
+    return out
+
+
 def wind_breeze(dur, fc=450, q=0.7):
     """Gentle continuous wind/air breeze."""
     n = int(dur * SR)

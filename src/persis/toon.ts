@@ -914,6 +914,26 @@ export function createToonActor(id: CharacterId, options: { gradientMap: THREE.T
       texture.needsUpdate = true;
       lastKey = key;
     }
+
+    // Organic idle dynamics: natural breathing, weight shifting, and expressive lean
+    const breath = Math.sin(drive.frame * 0.08 + options.seed * 3) * 0.015;
+    const sway = Math.sin(drive.frame * 0.035 + options.seed * 7) * 0.008;
+    const gestureLean = (drive.gesture ?? 0) * 0.035;
+
+    if (mesh.userData.baseScale === undefined) {
+      mesh.userData.baseScale = mesh.scale.y || 1.0;
+    }
+    const bs = mesh.userData.baseScale as number;
+    mesh.scale.set(bs * (1 - breath * 0.4), bs * (1 + breath), bs);
+
+    if (mesh.userData.basePos === undefined) {
+      mesh.userData.basePos = mesh.position.clone();
+    }
+    const bp = mesh.userData.basePos as THREE.Vector3;
+    mesh.position.set(bp.x + sway, bp.y + Math.abs(breath) * 0.006, bp.z);
+    mesh.rotation.z = Math.sin(drive.frame * 0.035 + options.seed * 7) * 0.008;
+    mesh.rotation.x = gestureLean;
+
     mesh.getWorldPosition(world);
     const parentYaw = mesh.parent ? new THREE.Euler().setFromQuaternion(mesh.parent.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y : 0;
     mesh.rotation.y = Math.atan2(cam.x - world.x, cam.z - world.z) - parentYaw;
