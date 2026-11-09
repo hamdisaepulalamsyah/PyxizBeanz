@@ -214,8 +214,8 @@ export function blinkAt(frame: number, seed: number): number {
   return amount;
 }
 
-/** Main breathing rate (Hz): slow, calm documentary breathing. */
-export const BREATH_HZ = 0.08;
+/** Main breathing rate (Hz): natural resting breath (~13 breaths/min), visible in short shots. */
+export const BREATH_HZ = 0.22;
 /** Side-to-side weight transfer rate (Hz). */
 const WEIGHT_SHIFT_HZ = 0.11;
 
