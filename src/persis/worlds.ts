@@ -38,6 +38,8 @@ export interface WorldFrame {
   localFrame: number;
   progress: number;
   fps: number;
+  /** Already positioned for this frame (used by camera-locked foreground layers). */
+  camera: THREE.PerspectiveCamera;
 }
 
 export interface WorldScene {
@@ -78,6 +80,12 @@ export class WorldKit {
   private readonly owned: Disposable[] = [];
   private glowTexture: THREE.CanvasTexture | null = null;
   private softTexture: THREE.CanvasTexture | null = null;
+  private readonly geoCache = new Map<string, THREE.BufferGeometry>();
+  private readonly doubleCache = new Map<string, THREE.MeshToonMaterial>();
+  private hull: THREE.MeshBasicMaterial | null = null;
+  private solidInk: THREE.MeshBasicMaterial | null = null;
+  private leafTex: THREE.CanvasTexture | null = null;
+  private shaftTex: THREE.CanvasTexture | null = null;
 
   constructor() {
     // Three-band ramp: lit / mid / cool core shadow.
@@ -345,10 +353,171 @@ export class WorldKit {
     return l;
   }
 
+  /** Geometry shared by many meshes (figure parts); created and tracked once. */
+  geo(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
+    let g = this.geoCache.get(key);
+    if (!g) {
+      g = this.track(make());
+      this.geoCache.set(key, g);
+    }
+    return g;
+  }
+
+  /** Inverted-hull ink outline shared by every low-poly figure. */
+  hullMaterial(): THREE.MeshBasicMaterial {
+    if (!this.hull) this.hull = this.track(new THREE.MeshBasicMaterial({ color: PALETTE.ink, side: THREE.BackSide }));
+    return this.hull;
+  }
+
+  /** Solid ink (eyes, small accents). */
+  inkSolid(): THREE.MeshBasicMaterial {
+    if (!this.solidInk) this.solidInk = this.track(new THREE.MeshBasicMaterial({ color: PALETTE.ink }));
+    return this.solidInk;
+  }
+
+  /** Cached double-sided toon material (open shells: caps, kerudung, cups). */
+  toonDouble(color: string): THREE.MeshToonMaterial {
+    const hit = this.doubleCache.get(color);
+    if (hit) return hit;
+    const m = this.track(new THREE.MeshToonMaterial({ color, gradientMap: this.gradient, side: THREE.DoubleSide }));
+    this.doubleCache.set(color, m);
+    return m;
+  }
+
+  /** Generic ovate tropical leaf (alpha cut-out). */
+  leafTexture(): THREE.CanvasTexture {
+    if (!this.leafTex) {
+      this.leafTex = this.canvas(128, 256, (c, w, h) => {
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.moveTo(w / 2, h * 0.98);
+        c.bezierCurveTo(w * 0.02, h * 0.7, w * 0.12, h * 0.15, w / 2, h * 0.02);
+        c.bezierCurveTo(w * 0.88, h * 0.15, w * 0.98, h * 0.7, w / 2, h * 0.98);
+        c.fill();
+        c.globalCompositeOperation = 'source-atop';
+        const g = c.createLinearGradient(0, 0, w, 0);
+        g.addColorStop(0, '#2c4f36');
+        g.addColorStop(1, '#3f6b45');
+        c.fillStyle = g;
+        c.fillRect(0, 0, w, h);
+        c.strokeStyle = 'rgba(170, 210, 140, 0.7)';
+        c.lineWidth = 3;
+        c.beginPath();
+        c.moveTo(w / 2, h);
+        c.lineTo(w / 2, h * 0.06);
+        c.stroke();
+      });
+    }
+    return this.leafTex;
+  }
+
+  /** Additive fake-volumetric light shaft: bright at `from`, widening and fading toward `to`. */
+  shaft(parent: THREE.Object3D, from: Vec3, to: Vec3, radius: number, color: string, opacity: number): THREE.Mesh<THREE.ConeGeometry, THREE.MeshBasicMaterial> {
+    const a = new THREE.Vector3(...from);
+    const b = new THREE.Vector3(...to);
+    if (!this.shaftTex) {
+      this.shaftTex = this.canvas(4, 256, (c, w, h) => {
+        const g = c.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, 'rgba(255,255,255,0.95)');
+        g.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        c.fillStyle = g;
+        c.fillRect(0, 0, w, h);
+      });
+    }
+    const geo = this.track(new THREE.ConeGeometry(radius, a.distanceTo(b), 40, 1, true));
+    const mat = this.track(
+      new THREE.MeshBasicMaterial({ color, map: this.shaftTex, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, fog: false }),
+    );
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    // Cone tip (+y, bright end of the texture) points back at the light source.
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a.clone().sub(b).normalize());
+    parent.add(mesh);
+    return mesh;
+  }
+
+  /**
+   * Illuminated dust motes: drift freely but only glow while inside a light
+   * volume — a cone from `from` to `to`, or a sphere around `from`.
+   * Returns an updater taking the frame and an optional light gain.
+   */
+  motes(parent: THREE.Object3D, opts: { from: Vec3; to?: Vec3; radius: number; count: number; color: string; size?: number; seed: number }): (frame: number, gain?: number) => void {
+    const rand = mulberry32(opts.seed);
+    const origin = new THREE.Vector3(...opts.from);
+    const axis = opts.to ? new THREE.Vector3(...opts.to).sub(origin) : new THREE.Vector3(0, 1, 0);
+    const len = opts.to ? axis.length() : 0;
+    axis.normalize();
+    const side = new THREE.Vector3().crossVectors(axis, Math.abs(axis.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(side, axis);
+    const n = opts.count;
+    const base = new Float32Array(n * 3);
+    const params = new Float32Array(n * 4);
+    const p = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      if (opts.to) {
+        const t = Math.cbrt(rand());
+        const r = opts.radius * t * Math.sqrt(rand()) * 1.15;
+        const a = rand() * Math.PI * 2;
+        p.copy(origin).addScaledVector(axis, t * len).addScaledVector(side, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r);
+      } else {
+        p.set(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1).normalize().multiplyScalar(opts.radius * Math.cbrt(rand()) * 1.1).add(origin);
+      }
+      base.set([p.x, p.y, p.z], i * 3);
+      params.set([0.006 + rand() * 0.01, rand() * Math.PI * 2, 0.05 + rand() * 0.12, 0.6 + rand() * 0.8], i * 4);
+    }
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const geo = this.track(new THREE.BufferGeometry());
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mat = this.track(
+      new THREE.PointsMaterial({ size: opts.size ?? 0.025, map: this.radial(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: false }),
+    );
+    const points = new THREE.Points(geo, mat);
+    points.frustumCulled = false;
+    parent.add(points);
+    const tint = new THREE.Color(opts.color);
+    const rel = new THREE.Vector3();
+    return (frame: number, gain = 1) => {
+      for (let i = 0; i < n; i++) {
+        const sp = params[i * 4] ?? 0;
+        const ph = params[i * 4 + 1] ?? 0;
+        const amp = params[i * 4 + 2] ?? 0;
+        const tw = params[i * 4 + 3] ?? 1;
+        const x = (base[i * 3] ?? 0) + Math.sin(frame * sp + ph) * amp;
+        const y = (base[i * 3 + 1] ?? 0) + Math.sin(frame * sp * 0.7 + ph * 1.3) * amp * 0.8;
+        const z = (base[i * 3 + 2] ?? 0) + Math.cos(frame * sp * 0.9 + ph) * amp;
+        pos[i * 3] = x;
+        pos[i * 3 + 1] = y;
+        pos[i * 3 + 2] = z;
+        rel.set(x, y, z).sub(origin);
+        let w: number;
+        if (opts.to) {
+          const along = rel.dot(axis) / len;
+          const radial = rel.addScaledVector(axis, -along * len).length();
+          const rAllowed = opts.radius * Math.max(along, 0.05);
+          w = Math.pow(clamp01(1 - radial / rAllowed), 1.5) * smoothstep(0, 0.12, along) * (1 - smoothstep(0.8, 1, along));
+        } else {
+          w = Math.pow(clamp01(1 - rel.length() / opts.radius), 1.6);
+        }
+        // Motes twinkle as they tumble through the light.
+        w *= gain * (0.55 + 0.45 * Math.sin(frame * 0.09 * tw + ph * 3));
+        col[i * 3] = tint.r * w;
+        col[i * 3 + 1] = tint.g * w;
+        col[i * 3 + 2] = tint.b * w;
+      }
+      geo.attributes.position!.needsUpdate = true;
+      geo.attributes.color!.needsUpdate = true;
+    };
+  }
+
   dispose(): void {
     for (const d of this.owned) d.dispose();
     this.owned.length = 0;
     this.toonCache.clear();
+    this.doubleCache.clear();
+    this.geoCache.clear();
   }
 }
 
