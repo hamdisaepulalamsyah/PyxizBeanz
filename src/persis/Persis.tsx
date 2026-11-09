@@ -16,6 +16,7 @@ import {
   CAPTION_FRAMING,
   type CaptionPage,
   type CastMember,
+  HOOK,
   PERSIS_DURATION_IN_FRAMES,
   PERSIS_FPS,
   SHOTS,
@@ -25,14 +26,19 @@ import {
   buildCaptionPages,
   captionPageAt,
   cutDipAt,
+  easeInCubic,
+  easeOutCubic,
   expressionAt,
   getShotAt,
+  hookShakeAt,
   isCastVisible,
   keyed,
+  lerp,
   parseSentences,
   parseWords,
   sampleCamera,
   smoothstep,
+  windowEnvelope,
 } from './story';
 import { type ToonActor, createToonActor, visemeAt } from './toon';
 import { FilmPipeline, WorldKit, type WorldScene, buildWorld } from './worlds';
@@ -126,7 +132,7 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
   const scene = useThree((s) => s.scene);
   const manager = useMemo(() => new StageManager(), []);
   const film = useMemo(() => new FilmPipeline(width, height), [width, height]);
-  const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35 }), []);
+  const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35, roll: 0 }), []);
   const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0 });
 
   useLayoutEffect(() => {
@@ -146,6 +152,7 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
 
   // Layout effect: runs before <ThreeCanvas>' frame renderer calls advance().
   useLayoutEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
     const { shot, index, localFrame, progress } = getShotAt(frame);
     const stage = manager.get(index);
     manager.show(index);
@@ -155,19 +162,20 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
     sampleCamera(frame, sample);
     camera.position.copy(sample.position);
     camera.lookAt(sample.target);
-    if (camera instanceof THREE.PerspectiveCamera) {
-      camera.fov = sample.fov;
-      camera.near = 0.05;
-      camera.far = 260;
-      camera.updateProjectionMatrix();
-    }
+    camera.rotateZ(sample.roll);
+    camera.fov = sample.fov;
+    camera.near = 0.05;
+    camera.far = 260;
+    camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
 
-    stage.world.update({ frame, localFrame, progress, fps });
+    stage.world.update({ frame, localFrame, progress, fps, camera });
     for (const { member, actor } of stage.cast) {
       actor.mesh.visible = isCastVisible(member, progress);
       if (!actor.mesh.visible) continue;
       const speaking = member.speaking.some(([a, b]) => progress >= a && progress <= b);
+      const talkEnvelope = windowEnvelope(member.speaking, progress);
+      const gesture = keyed(member.gesture ?? [[0, 0]], progress);
       actor.update(
         {
           frame,
@@ -175,7 +183,9 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
           viseme: visemeAt(words, frame, speaking),
           turn: keyed(member.turn ?? [[0, 0]], progress),
           nod: keyed(member.nod ?? [[0, 0]], progress),
-          gesture: keyed(member.gesture ?? [[0, 0]], progress),
+          gesture,
+          lean: Math.max(talkEnvelope * 0.65, gesture),
+          listening: 1 - talkEnvelope,
         },
         camera.position,
       );
@@ -275,9 +285,11 @@ const Captions: React.FC<{ pages: readonly CaptionPage[]; words: readonly WordTi
 
 const ShotChip: React.FC = () => {
   const frame = useCurrentFrame();
-  const { shot, localFrame } = getShotAt(frame);
+  const { shot, index, localFrame } = getShotAt(frame);
   const len = shot.to - shot.from;
-  const o = interpolate(localFrame, [10, 22, len - 22, len - 10], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  // The opening shot's chip waits until the hook title has cleared.
+  const start = index === 0 ? HOOK.outEnd - shot.from : 10;
+  const o = interpolate(localFrame, [start, start + 12, len - 22, len - 10], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   return (
     <div
       style={{
@@ -307,28 +319,102 @@ const ShotChip: React.FC = () => {
   );
 };
 
-const TitleCard: React.FC = () => {
+/**
+ * 0–3 s hook: teaser badge drops in, the title slams down at HOOK.impactFrame
+ * with a squash-and-bounce, a gold flash/aura, expanding rules and a shake.
+ */
+const HookTitle: React.FC = () => {
   const frame = useCurrentFrame();
-  const o = interpolate(frame, [14, 30, 120, 140], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  if (o <= 0) return null;
+  const { badgeIn, impactFrame: hit, holdUntil, outEnd } = HOOK;
+  if (frame >= outEnd) return null;
+  const d = frame - hit;
+  const out = smoothstep(holdUntil, outEnd, frame);
+  const shake = hookShakeAt(frame);
+  const sx = shake * 16 * Math.sin(frame * 2.9);
+  const sy = shake * 11 * Math.sin(frame * 3.7 + 1);
+  const rot = shake * 1.4 * Math.sin(frame * 2.6 + 1.3);
+
+  // Title: falls in from 2.6x over 7 frames, squashes on impact, then a damped bounce.
+  const fall = smoothstep(hit - 7, hit, frame);
+  const titleScale = d < 0 ? lerp(2.6, 1, easeInCubic(fall)) : 1 - 0.16 * Math.exp(-d / 4.5) * Math.cos(d * 0.9);
+  const titleOpacity = d < 0 ? fall : 1;
+  const squashY = d >= 0 ? 1 + 0.1 * Math.exp(-d / 3) * Math.cos(d * 1.2 + Math.PI) : 1;
+  const aura = d < 0 ? 0 : 0.5 + 0.5 * Math.exp(-d / 8) + 0.12 * Math.sin(frame * 0.25);
+  const flash = d < 0 ? 0 : 0.6 * Math.exp(-d / 3);
+
+  const badgeT = easeOutCubic(smoothstep(badgeIn, badgeIn + 8, frame));
+  const badgeJolt = d >= 0 ? 1 + 0.06 * Math.exp(-d / 4) : 1;
+  const rule = easeOutCubic(smoothstep(hit, hit + 16, frame));
+  const ruleWidth = rule * (300 + 18 * Math.sin(frame * 0.18));
+
   return (
-    <AbsoluteFill style={{ alignItems: 'center', paddingTop: 330, fontFamily: FONT_FAMILY, opacity: o, pointerEvents: 'none' }}>
-      <div style={{ fontWeight: 800, fontSize: 40, letterSpacing: '0.42em', color: CAPTION_FRAMING.highlight, textShadow: '0 4px 0 #170c19' }}>SEJARAH PERSIS</div>
-      <div
+    <>
+      <AbsoluteFill style={{ pointerEvents: 'none', background: `radial-gradient(ellipse 80% 45% at 50% 32%, rgba(255,236,170,${flash}) 0%, rgba(251,191,36,${flash * 0.4}) 40%, rgba(0,0,0,0) 75%)` }} />
+      <AbsoluteFill
         style={{
-          marginTop: 14,
-          fontWeight: 800,
-          fontSize: 108,
-          lineHeight: 1,
-          color: '#FFF6E2',
-          WebkitTextStroke: '12px #170c19',
-          paintOrder: 'stroke fill',
-          transform: `scale(${1 + (1 - smoothstep(14, 34, frame)) * 0.08})`,
+          alignItems: 'center',
+          paddingTop: 300,
+          fontFamily: FONT_FAMILY,
+          pointerEvents: 'none',
+          opacity: 1 - out,
+          transform: `translate(${sx}px, ${sy - out * 40}px) rotate(${rot}deg) scale(${1 + out * 0.08})`,
         }}
       >
-        Dalilnya Mana?
-      </div>
-    </AbsoluteFill>
+        <div
+          style={{
+            maxWidth: 880,
+            padding: '16px 30px',
+            borderRadius: 18,
+            textAlign: 'center',
+            fontWeight: 800,
+            fontSize: 32,
+            lineHeight: 1.25,
+            letterSpacing: `${lerp(0.4, 0.12, badgeT)}em`,
+            color: '#FFF3D6',
+            background: 'linear-gradient(180deg, rgba(150,32,32,0.92), rgba(98,18,28,0.92))',
+            border: `3px solid ${CAPTION_FRAMING.highlight}`,
+            boxShadow: `0 0 ${24 + aura * 24}px rgba(251,191,36,${0.25 + aura * 0.3}), 0 8px 0 rgba(23,12,25,0.85)`,
+            opacity: badgeT,
+            transform: `translateY(${(1 - badgeT) * -60}px) scale(${badgeJolt})`,
+          }}
+        >
+          {HOOK.teaser}
+        </div>
+        <div style={{ position: 'relative', marginTop: 44 }}>
+          <div
+            style={{
+              position: 'absolute',
+              inset: '-60px -80px',
+              borderRadius: '50%',
+              background: `radial-gradient(ellipse at center, rgba(251,191,36,${aura * 0.45}) 0%, rgba(251,191,36,0) 70%)`,
+              filter: 'blur(8px)',
+            }}
+          />
+          <div
+            style={{
+              position: 'relative',
+              fontWeight: 800,
+              fontSize: 128,
+              lineHeight: 1,
+              color: '#FFF6E2',
+              WebkitTextStroke: '13px #170c19',
+              paintOrder: 'stroke fill',
+              textShadow: `0 0 ${20 + aura * 50}px rgba(251,191,36,${0.35 + aura * 0.5}), 0 10px 0 rgba(23,12,25,0.9)`,
+              opacity: titleOpacity,
+              transform: `scale(${titleScale}, ${titleScale * squashY})`,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {HOOK.title}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 34, opacity: rule }}>
+          <div style={{ width: ruleWidth, height: 5, borderRadius: 3, background: `linear-gradient(90deg, rgba(251,191,36,0), ${CAPTION_FRAMING.highlight})` }} />
+          <div style={{ fontWeight: 800, fontSize: 34, letterSpacing: '0.38em', color: CAPTION_FRAMING.highlight, textShadow: '0 4px 0 #170c19', whiteSpace: 'nowrap' }}>{HOOK.kicker}</div>
+          <div style={{ width: ruleWidth, height: 5, borderRadius: 3, background: `linear-gradient(90deg, ${CAPTION_FRAMING.highlight}, rgba(251,191,36,0))` }} />
+        </div>
+      </AbsoluteFill>
+    </>
   );
 };
 
@@ -343,7 +429,7 @@ export const Persis: React.FC<PersisProps> = ({ words, sentences }) => {
       </ThreeCanvas>
       {/* Bottom scrim keeps captions legible over bright scenes. */}
       <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(10,8,28,0.72) 0%, rgba(10,8,28,0) 34%)', pointerEvents: 'none' }} />
-      <TitleCard />
+      <HookTitle />
       <ShotChip />
       <Captions pages={pages} words={words} />
       <Audio src={staticFile('voice.wav')} />

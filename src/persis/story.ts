@@ -13,6 +13,23 @@ export const PERSIS_HEIGHT = 1920;
 /** Frames of the dip-to-indigo on each side of a shot cut. */
 export const SHOT_DIP_FRAMES = 9;
 
+/** Opening hook (frames 0–90): teaser badge, title slam at `impactFrame`, camera shake. */
+export const HOOK = {
+  badgeIn: 2,
+  impactFrame: 16,
+  holdUntil: 80,
+  outEnd: 94,
+  teaser: 'SATU PERTANYAAN MENGGUNCANG HINDIA BELANDA',
+  title: 'Dalilnya Mana?',
+  kicker: 'SEJARAH PERSIS',
+} as const;
+
+/** 0..1 decaying impact energy after the title slam (drives camera + title shake). */
+export function hookShakeAt(frame: number): number {
+  const d = frame - HOOK.impactFrame;
+  return d < 0 ? 0 : Math.exp(-d / 6);
+}
+
 // ── Math helpers shared by every module ─────────────────────────────────────
 
 export type Vec3 = readonly [number, number, number];
@@ -25,6 +42,36 @@ export const smoothstep = (e0: number, e1: number, x: number): number => {
 };
 export const easeInOutSine = (t: number): number => -(Math.cos(Math.PI * clamp01(t)) - 1) / 2;
 export const easeOutCubic = (t: number): number => 1 - Math.pow(1 - clamp01(t), 3);
+export const easeInCubic = (t: number): number => Math.pow(clamp01(t), 3);
+
+/** Deterministic 0..1 hash for seeded per-character variation. */
+export const hash01 = (seed: number, k: number): number => {
+  const x = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+};
+
+/** Seeded soft listening nods (single or double) roughly every 2.5–4 s; 0..1. */
+export function nodPulseAt(frame: number, seed: number): number {
+  const period = 96;
+  const k0 = Math.floor(frame / period);
+  let v = 0;
+  for (let k = k0 - 1; k <= k0; k++) {
+    const t0 = k * period + 10 + hash01(seed + 31, k) * 50;
+    const beats = hash01(seed + 41, k) > 0.55 ? 2 : 1;
+    for (let b = 0; b < beats; b++) {
+      const d = frame - t0 - b * 11;
+      if (d >= 0 && d <= 12) v = Math.max(v, Math.sin((d / 12) * Math.PI));
+    }
+  }
+  return v;
+}
+
+/** 0..1 envelope over progress windows, ramping smoothly in and out at each edge. */
+export function windowEnvelope(windows: readonly (readonly [number, number])[], progress: number, ramp = 0.03): number {
+  let v = 0;
+  for (const [a, b] of windows) v = Math.max(v, Math.min(smoothstep(a - ramp, a + ramp, progress), 1 - smoothstep(b - ramp, b + ramp, progress)));
+  return v;
+}
 
 /** Linear interpolation through `[t, value]` keys with smoothstep easing per segment. */
 export function keyed(keys: readonly (readonly [number, number])[], t: number): number {
@@ -330,8 +377,10 @@ export function cutDipAt(frame: number): number {
     const d = Math.abs(frame + 0.5 - s.from) / SHOT_DIP_FRAMES;
     dip = Math.max(dip, 1 - smoothstep(0, 1, d));
   }
-  // Fade in from black at the head and out at the tail.
-  dip = Math.max(dip, 1 - smoothstep(0, 14, frame), smoothstep(PERSIS_DURATION_IN_FRAMES - 20, PERSIS_DURATION_IN_FRAMES - 1, frame));
+  // Hook: hold the world half-dark under the teaser, then reveal on the title slam.
+  const hit = HOOK.impactFrame;
+  const head = frame < hit ? lerp(1, 0.5, smoothstep(0, hit, frame)) : 0.5 * (1 - smoothstep(hit, hit + 8, frame));
+  dip = Math.max(dip, head, smoothstep(PERSIS_DURATION_IN_FRAMES - 20, PERSIS_DURATION_IN_FRAMES - 1, frame));
   return dip;
 }
 
@@ -364,6 +413,8 @@ export interface CameraSample {
   position: THREE.Vector3;
   target: THREE.Vector3;
   fov: number;
+  /** Camera roll in radians (impact shake). */
+  roll: number;
 }
 
 interface CameraRig {
@@ -410,7 +461,7 @@ export function sampleCamera(frame: number, out?: CameraSample): CameraSample {
   const { shot, progress } = getShotAt(frame);
   const rig = rigFor(shot);
   const u = curveParam(rig.times, progress);
-  const sample = out ?? { position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35 };
+  const sample = out ?? { position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35, roll: 0 };
   rig.pos.getPoint(u, sample.position);
   rig.target.getPoint(u, sample.target);
   const fovKeys = shot.camera.map((k) => [k.t, k.fov] as const);
@@ -419,6 +470,13 @@ export function sampleCamera(frame: number, out?: CameraSample): CameraSample {
   sample.position.x += Math.sin(s * 0.9) * 0.012 + Math.sin(s * 2.3) * 0.004;
   sample.position.y += Math.sin(s * 1.3 + 1) * 0.009;
   sample.target.x += Math.sin(s * 0.7 + 2) * 0.01;
+  // High-frequency decaying shake when the hook title slams in.
+  const k = hookShakeAt(frame);
+  sample.position.x += k * 0.09 * Math.sin(frame * 2.9);
+  sample.position.y += k * 0.07 * Math.sin(frame * 3.7 + 1);
+  sample.target.x += k * 0.14 * Math.sin(frame * 2.3 + 2);
+  sample.target.y += k * 0.1 * Math.sin(frame * 3.1 + 0.5);
+  sample.roll = k * 0.025 * Math.sin(frame * 2.6 + 1.3);
   return sample;
 }
 
