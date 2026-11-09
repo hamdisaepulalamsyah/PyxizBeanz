@@ -38,6 +38,8 @@ export interface WorldFrame {
   localFrame: number;
   progress: number;
   fps: number;
+  /** Already positioned for this frame (used by camera-locked foreground layers). */
+  camera: THREE.PerspectiveCamera;
 }
 
 export interface WorldScene {
@@ -78,6 +80,12 @@ export class WorldKit {
   private readonly owned: Disposable[] = [];
   private glowTexture: THREE.CanvasTexture | null = null;
   private softTexture: THREE.CanvasTexture | null = null;
+  private readonly geoCache = new Map<string, THREE.BufferGeometry>();
+  private readonly doubleCache = new Map<string, THREE.MeshToonMaterial>();
+  private hull: THREE.MeshBasicMaterial | null = null;
+  private solidInk: THREE.MeshBasicMaterial | null = null;
+  private leafTex: THREE.CanvasTexture | null = null;
+  private shaftTex: THREE.CanvasTexture | null = null;
 
   constructor() {
     // Three-band ramp: lit / mid / cool core shadow.
@@ -345,10 +353,171 @@ export class WorldKit {
     return l;
   }
 
+  /** Geometry shared by many meshes (figure parts); created and tracked once. */
+  geo(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
+    let g = this.geoCache.get(key);
+    if (!g) {
+      g = this.track(make());
+      this.geoCache.set(key, g);
+    }
+    return g;
+  }
+
+  /** Inverted-hull ink outline shared by every low-poly figure. */
+  hullMaterial(): THREE.MeshBasicMaterial {
+    if (!this.hull) this.hull = this.track(new THREE.MeshBasicMaterial({ color: PALETTE.ink, side: THREE.BackSide }));
+    return this.hull;
+  }
+
+  /** Solid ink (eyes, small accents). */
+  inkSolid(): THREE.MeshBasicMaterial {
+    if (!this.solidInk) this.solidInk = this.track(new THREE.MeshBasicMaterial({ color: PALETTE.ink }));
+    return this.solidInk;
+  }
+
+  /** Cached double-sided toon material (open shells: caps, kerudung, cups). */
+  toonDouble(color: string): THREE.MeshToonMaterial {
+    const hit = this.doubleCache.get(color);
+    if (hit) return hit;
+    const m = this.track(new THREE.MeshToonMaterial({ color, gradientMap: this.gradient, side: THREE.DoubleSide }));
+    this.doubleCache.set(color, m);
+    return m;
+  }
+
+  /** Generic ovate tropical leaf (alpha cut-out). */
+  leafTexture(): THREE.CanvasTexture {
+    if (!this.leafTex) {
+      this.leafTex = this.canvas(128, 256, (c, w, h) => {
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.moveTo(w / 2, h * 0.98);
+        c.bezierCurveTo(w * 0.02, h * 0.7, w * 0.12, h * 0.15, w / 2, h * 0.02);
+        c.bezierCurveTo(w * 0.88, h * 0.15, w * 0.98, h * 0.7, w / 2, h * 0.98);
+        c.fill();
+        c.globalCompositeOperation = 'source-atop';
+        const g = c.createLinearGradient(0, 0, w, 0);
+        g.addColorStop(0, '#2c4f36');
+        g.addColorStop(1, '#3f6b45');
+        c.fillStyle = g;
+        c.fillRect(0, 0, w, h);
+        c.strokeStyle = 'rgba(170, 210, 140, 0.7)';
+        c.lineWidth = 3;
+        c.beginPath();
+        c.moveTo(w / 2, h);
+        c.lineTo(w / 2, h * 0.06);
+        c.stroke();
+      });
+    }
+    return this.leafTex;
+  }
+
+  /** Additive fake-volumetric light shaft: bright at `from`, widening and fading toward `to`. */
+  shaft(parent: THREE.Object3D, from: Vec3, to: Vec3, radius: number, color: string, opacity: number): THREE.Mesh<THREE.ConeGeometry, THREE.MeshBasicMaterial> {
+    const a = new THREE.Vector3(...from);
+    const b = new THREE.Vector3(...to);
+    if (!this.shaftTex) {
+      this.shaftTex = this.canvas(4, 256, (c, w, h) => {
+        const g = c.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, 'rgba(255,255,255,0.95)');
+        g.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        c.fillStyle = g;
+        c.fillRect(0, 0, w, h);
+      });
+    }
+    const geo = this.track(new THREE.ConeGeometry(radius, a.distanceTo(b), 40, 1, true));
+    const mat = this.track(
+      new THREE.MeshBasicMaterial({ color, map: this.shaftTex, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, fog: false }),
+    );
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    // Cone tip (+y, bright end of the texture) points back at the light source.
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a.clone().sub(b).normalize());
+    parent.add(mesh);
+    return mesh;
+  }
+
+  /**
+   * Illuminated dust motes: drift freely but only glow while inside a light
+   * volume — a cone from `from` to `to`, or a sphere around `from`.
+   * Returns an updater taking the frame and an optional light gain.
+   */
+  motes(parent: THREE.Object3D, opts: { from: Vec3; to?: Vec3; radius: number; count: number; color: string; size?: number; seed: number }): (frame: number, gain?: number) => void {
+    const rand = mulberry32(opts.seed);
+    const origin = new THREE.Vector3(...opts.from);
+    const axis = opts.to ? new THREE.Vector3(...opts.to).sub(origin) : new THREE.Vector3(0, 1, 0);
+    const len = opts.to ? axis.length() : 0;
+    axis.normalize();
+    const side = new THREE.Vector3().crossVectors(axis, Math.abs(axis.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(side, axis);
+    const n = opts.count;
+    const base = new Float32Array(n * 3);
+    const params = new Float32Array(n * 4);
+    const p = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      if (opts.to) {
+        const t = Math.cbrt(rand());
+        const r = opts.radius * t * Math.sqrt(rand()) * 1.15;
+        const a = rand() * Math.PI * 2;
+        p.copy(origin).addScaledVector(axis, t * len).addScaledVector(side, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r);
+      } else {
+        p.set(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1).normalize().multiplyScalar(opts.radius * Math.cbrt(rand()) * 1.1).add(origin);
+      }
+      base.set([p.x, p.y, p.z], i * 3);
+      params.set([0.006 + rand() * 0.01, rand() * Math.PI * 2, 0.05 + rand() * 0.12, 0.6 + rand() * 0.8], i * 4);
+    }
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const geo = this.track(new THREE.BufferGeometry());
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mat = this.track(
+      new THREE.PointsMaterial({ size: opts.size ?? 0.025, map: this.radial(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: false }),
+    );
+    const points = new THREE.Points(geo, mat);
+    points.frustumCulled = false;
+    parent.add(points);
+    const tint = new THREE.Color(opts.color);
+    const rel = new THREE.Vector3();
+    return (frame: number, gain = 1) => {
+      for (let i = 0; i < n; i++) {
+        const sp = params[i * 4] ?? 0;
+        const ph = params[i * 4 + 1] ?? 0;
+        const amp = params[i * 4 + 2] ?? 0;
+        const tw = params[i * 4 + 3] ?? 1;
+        const x = (base[i * 3] ?? 0) + Math.sin(frame * sp + ph) * amp;
+        const y = (base[i * 3 + 1] ?? 0) + Math.sin(frame * sp * 0.7 + ph * 1.3) * amp * 0.8;
+        const z = (base[i * 3 + 2] ?? 0) + Math.cos(frame * sp * 0.9 + ph) * amp;
+        pos[i * 3] = x;
+        pos[i * 3 + 1] = y;
+        pos[i * 3 + 2] = z;
+        rel.set(x, y, z).sub(origin);
+        let w: number;
+        if (opts.to) {
+          const along = rel.dot(axis) / len;
+          const radial = rel.addScaledVector(axis, -along * len).length();
+          const rAllowed = opts.radius * Math.max(along, 0.05);
+          w = Math.pow(clamp01(1 - radial / rAllowed), 1.5) * smoothstep(0, 0.12, along) * (1 - smoothstep(0.8, 1, along));
+        } else {
+          w = Math.pow(clamp01(1 - rel.length() / opts.radius), 1.6);
+        }
+        // Motes twinkle as they tumble through the light.
+        w *= gain * (0.55 + 0.45 * Math.sin(frame * 0.09 * tw + ph * 3));
+        col[i * 3] = tint.r * w;
+        col[i * 3 + 1] = tint.g * w;
+        col[i * 3 + 2] = tint.b * w;
+      }
+      geo.attributes.position!.needsUpdate = true;
+      geo.attributes.color!.needsUpdate = true;
+    };
+  }
+
   dispose(): void {
     for (const d of this.owned) d.dispose();
     this.owned.length = 0;
     this.toonCache.clear();
+    this.doubleCache.clear();
+    this.geoCache.clear();
   }
 }
 
@@ -628,20 +797,366 @@ function bookStack(kit: WorldKit, parent: THREE.Object3D, pos: Vec3, n: number, 
   }
 }
 
-function silhouetteCrowd(kit: WorldKit, parent: THREE.Object3D, spots: readonly Vec3[], seed: number): void {
-  const rand = mulberry32(seed);
-  const body = kit.toon('#232045');
-  const cap = kit.toon('#120f1c');
-  for (const [x, y, z] of spots) {
-    const s = 0.9 + rand() * 0.2;
-    const g = new THREE.Group();
-    g.position.set(x, y, z);
-    g.scale.setScalar(s);
-    parent.add(g);
-    kit.mesh(g, new THREE.CapsuleGeometry(0.2, 0.42, 4, 10), body, [0, 0.42, 0], { ink: false });
-    kit.mesh(g, new THREE.SphereGeometry(0.17, 14, 10), body, [0, 0.9, 0], { ink: false });
-    if (rand() < 0.7) kit.cyl(g, 0.14, 0.15, 0.1, [0, 1.03, 0], cap, { seg: 12, ink: false });
+// ── Figuran: low-poly bean-head background cast ─────────────────────────────
+
+export type ExtraHeadgear = 'peci' | 'kopiah' | 'caping' | 'turban' | 'kerudung' | 'bare';
+export type ExtraPose = 'stand' | 'walk' | 'bench' | 'bersila';
+export type ExtraProp = 'none' | 'pikulan' | 'papers' | 'kitab';
+
+export interface ExtraSpec {
+  pos: Vec3;
+  /** Yaw in radians; 0 faces +z (towards the default camera). */
+  yaw: number;
+  pose: ExtraPose;
+  headgear: ExtraHeadgear;
+  outfit: string;
+  /** Trousers / sarung colour. */
+  lower?: string;
+  /** Kerudung colour. */
+  accent?: string;
+  skin?: string;
+  prop?: ExtraProp;
+  scale?: number;
+  /** Walk speed in units per frame along the facing direction (or along x when `range` is set). */
+  speed?: number;
+  /** Ping-pong along world x between these bounds, turning around at each end. */
+  range?: readonly [number, number];
+  /** 0..1: attentive listeners bow slightly and give soft nods. */
+  attentive?: number;
+  seed: number;
+}
+
+const EXTRA_SKINS = ['#d9a77c', '#c99068', '#b97f57', '#e0b48c'] as const;
+
+export function faceToward(from: Vec3, to: Vec3): number {
+  return Math.atan2(to[0] - from[0], to[2] - from[2]);
+}
+
+/** Builds one figure; returns its per-frame idle / walk animator. */
+function buildExtra(kit: WorldKit, parent: THREE.Object3D, spec: ExtraSpec): (f: WorldFrame) => void {
+  const root = new THREE.Group();
+  root.position.set(...spec.pos);
+  root.rotation.y = spec.yaw;
+  root.scale.setScalar(spec.scale ?? 0.9);
+  parent.add(root);
+  const hull = kit.hullMaterial();
+  const skin = kit.toon(spec.skin ?? EXTRA_SKINS[spec.seed % EXTRA_SKINS.length] ?? '#d9a77c');
+  const cloth = kit.toon(spec.outfit);
+  const lower = kit.toon(spec.lower ?? '#2d2a3a');
+
+  const part = (p: THREE.Object3D, key: string, make: () => THREE.BufferGeometry, mat: THREE.Material, pos: Vec3, outline = false, rot?: Vec3): THREE.Mesh => {
+    const m = new THREE.Mesh(kit.geo(key, make), mat);
+    m.position.set(...pos);
+    if (rot) m.rotation.set(...rot);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    if (outline) {
+      const h = new THREE.Mesh(m.geometry, hull);
+      h.scale.setScalar(1.07);
+      m.add(h);
+    }
+    p.add(m);
+    return m;
+  };
+
+  const pose = spec.pose;
+  const hipBase = pose === 'bersila' ? 0.14 : 0.47;
+  const hips = new THREE.Group();
+  hips.position.y = hipBase;
+  root.add(hips);
+  const torso = new THREE.Group();
+  hips.add(torso);
+  const chest = part(torso, 'x-torso', () => new THREE.CapsuleGeometry(0.2, 0.3, 6, 14), cloth, [0, 0.35, 0], true);
+  chest.scale.set(1, 1, 0.8);
+  const neck = new THREE.Group();
+  neck.position.y = 0.7;
+  torso.add(neck);
+  part(
+    neck,
+    'x-head',
+    () => {
+      const g = new THREE.SphereGeometry(0.2, 18, 14);
+      g.scale(1, 1.12, 0.96);
+      return g;
+    },
+    skin,
+    [0, 0.2, 0.01],
+    true,
+  );
+  for (const sx of [-1, 1]) part(neck, 'x-eye', () => new THREE.SphereGeometry(0.022, 8, 6), kit.inkSolid(), [sx * 0.07, 0.23, 0.195]);
+
+  switch (spec.headgear) {
+    case 'peci':
+    case 'kopiah': {
+      const hat = part(neck, 'x-peci', () => new THREE.CylinderGeometry(0.17, 0.182, 0.13, 20), kit.toon(spec.headgear === 'peci' ? '#17121c' : '#f2eee6'), [0, 0.37, 0], true);
+      hat.scale.z = 0.9;
+      break;
+    }
+    case 'caping':
+      part(neck, 'x-caping', () => new THREE.ConeGeometry(0.44, 0.22, 20), kit.toon('#caa25a'), [0, 0.47, 0], true);
+      break;
+    case 'turban':
+      part(neck, 'x-turban-dome', () => new THREE.SphereGeometry(0.21, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), kit.toon('#f1ede4'), [0, 0.27, 0], true);
+      part(neck, 'x-turban-band', () => new THREE.TorusGeometry(0.19, 0.055, 8, 20), kit.toon('#e2dccf'), [0, 0.29, 0], false, [Math.PI / 2, 0, 0]);
+      break;
+    case 'kerudung':
+      part(neck, 'x-kerudung', () => new THREE.SphereGeometry(0.235, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), kit.toonDouble(spec.accent ?? '#e9d9c2'), [0, 0.2, -0.01], true);
+      part(torso, 'x-kerudung-cape', () => new THREE.ConeGeometry(0.3, 0.32, 18, 1, true), kit.toonDouble(spec.accent ?? '#e9d9c2'), [0, 0.6, 0]);
+      break;
+    case 'bare':
+      part(neck, 'x-hair', () => new THREE.SphereGeometry(0.208, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.42), kit.toon('#1d1616'), [0, 0.205, -0.005]);
+      break;
   }
+
+  const shoulder = (sx: number): THREE.Group => {
+    const g = new THREE.Group();
+    g.position.set(sx * 0.235, 0.58, 0);
+    torso.add(g);
+    part(
+      g,
+      'x-arm',
+      () => {
+        const a = new THREE.CapsuleGeometry(0.06, 0.3, 4, 8);
+        a.translate(0, -0.2, 0);
+        return a;
+      },
+      cloth,
+      [0, 0, 0],
+    );
+    part(g, 'x-hand', () => new THREE.SphereGeometry(0.058, 10, 8), skin, [0, -0.4, 0]);
+    return g;
+  };
+  const armL = shoulder(-1);
+  const armR = shoulder(1);
+
+  const legs: THREE.Group[] = [];
+  if (pose === 'bersila') {
+    for (const s of [-1, 1]) part(hips, 'x-lap', () => new THREE.CapsuleGeometry(0.085, 0.42, 4, 8), lower, [0, -0.03, 0.13], false, [0, s * 0.3, Math.PI / 2]);
+  } else {
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(sx * 0.09, 0, 0);
+      hips.add(leg);
+      part(
+        leg,
+        'x-leg',
+        () => {
+          const l = new THREE.CapsuleGeometry(0.075, 0.3, 4, 8);
+          l.translate(0, -0.22, 0);
+          return l;
+        },
+        lower,
+        [0, 0, 0],
+      );
+      if (pose === 'bench') {
+        leg.rotation.x = -Math.PI / 2;
+        part(hips, 'x-shin', () => new THREE.CapsuleGeometry(0.07, 0.24, 4, 8), lower, [sx * 0.09, -0.2, 0.42]);
+      }
+      legs.push(leg);
+    }
+  }
+
+  const prop = spec.prop ?? 'none';
+  const baskets: THREE.Group[] = [];
+  if (prop === 'pikulan') {
+    part(torso, 'x-pole', () => new THREE.CylinderGeometry(0.018, 0.018, 1.5, 6), kit.toon('#8a6a3a'), [0.2, 0.76, 0], false, [Math.PI / 2, 0, 0]);
+    for (const z of [-0.68, 0.68]) {
+      const b = new THREE.Group();
+      b.position.set(0.2, 0.76, z);
+      torso.add(b);
+      part(b, 'x-rope', () => new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), kit.toon('#c9b48a'), [0, -0.2, 0]);
+      part(b, 'x-basket', () => new THREE.CylinderGeometry(0.17, 0.13, 0.18, 12, 1, true), kit.toonDouble('#9a7040'), [0, -0.48, 0], true);
+      for (let k = 0; k < 3; k++) part(b, 'x-fruit', () => new THREE.SphereGeometry(0.06, 8, 6), kit.toon(k % 2 ? '#d9822b' : '#6f9a3a'), [(k - 1) * 0.07, -0.4, (k % 2) * 0.04]);
+      baskets.push(b);
+    }
+    armR.rotation.set(-2.75, 0, 0.12);
+  } else if (prop === 'papers') {
+    const stack = part(torso, 'x-papers', () => new THREE.BoxGeometry(0.36, 0.16, 0.27), kit.toon('#efe6cf'), [0, 0.36, 0.3]);
+    kit.ink(stack, 20);
+    armL.rotation.set(-1.15, 0, 0.3);
+    armR.rotation.set(-1.15, 0, -0.3);
+  } else if (prop === 'kitab') {
+    part(hips, 'x-kitab', () => new THREE.BoxGeometry(0.22, 0.035, 0.16), kit.toon('#6b2a1e'), [0, 0.03, 0.27]);
+    armL.rotation.set(-0.7, 0, 0.15);
+    armR.rotation.set(-0.7, 0, -0.15);
+  } else if (pose === 'bersila' || pose === 'bench') {
+    // Hands resting on the knees.
+    armL.rotation.set(-0.45, 0, 0.12);
+    armR.rotation.set(-0.45, 0, -0.12);
+  }
+  const armRestL = armL.rotation.x;
+  const armRestR = armR.rotation.x;
+  const swingArms = prop === 'none';
+  const att = spec.attentive ?? 0;
+  const ph = spec.seed * 1.37;
+
+  return ({ frame, localFrame }) => {
+    const t = frame / 30;
+    let walk = 0;
+    let cycle = 0;
+    if (spec.speed !== undefined) {
+      if (spec.range) {
+        const [a, b] = spec.range;
+        const half = (b - a) / 2;
+        const phase = (localFrame * spec.speed) / Math.max(half, 0.01) + ph;
+        root.position.x = (a + b) / 2 - Math.cos(phase) * half;
+        const v = Math.sin(phase);
+        // Turning around passes through facing the camera, which reads naturally.
+        root.rotation.y = (Math.PI / 2) * Math.max(-1, Math.min(1, v * 4));
+        walk = Math.min(1, Math.abs(v) * 1.6);
+        cycle = (phase * half) / 0.28;
+      } else {
+        const d = spec.speed * localFrame;
+        root.position.x = spec.pos[0] + Math.sin(spec.yaw) * d;
+        root.position.z = spec.pos[2] + Math.cos(spec.yaw) * d;
+        walk = 1;
+        cycle = Math.abs(d) / 0.28 + ph;
+      }
+    }
+    const s = Math.sin(cycle);
+    for (const [i, leg] of legs.entries()) if (pose === 'stand' || pose === 'walk') leg.rotation.x = (i === 0 ? s : -s) * 0.6 * walk;
+    if (swingArms) {
+      armL.rotation.x = armRestL - s * 0.45 * walk;
+      armR.rotation.x = armRestR + s * 0.45 * walk;
+    }
+    const idle = 1 - walk;
+    const seatedK = pose === 'bench' || pose === 'bersila' ? 0.4 : 1;
+    const weight = Math.sin(2 * Math.PI * 0.09 * t + ph);
+    hips.position.set(weight * 0.015 * idle * seatedK, hipBase + Math.abs(Math.cos(cycle)) * 0.04 * walk, 0);
+    torso.rotation.set(0.08 * walk + att * 0.06, 0, weight * 0.03 * idle * seatedK);
+    // Normal-rate breathing for extras (~0.24 Hz).
+    const br = Math.sin(2 * Math.PI * 0.24 * t + ph);
+    chest.scale.set(1 + br * 0.012, 1 + br * 0.02, 0.8 + br * 0.01);
+    neck.position.y = 0.7 + br * 0.006;
+    neck.rotation.set(
+      att * 0.14 + nodPulseAt(frame, spec.seed) * 0.22 * att + s * 0.04 * walk,
+      Math.sin(t * 0.31 + ph) * 0.32 * (1 - 0.7 * att) + Math.sin(t * 0.83 + ph * 2) * 0.05,
+      Math.sin(t * 0.5 + ph) * 0.04,
+    );
+    baskets.forEach((b, i) => {
+      b.rotation.x = Math.sin(cycle + i * Math.PI) * 0.14 * walk + Math.sin(t * 1.3 + i) * 0.03;
+      b.position.y = 0.76 - Math.abs(Math.cos(cycle)) * 0.03 * walk;
+    });
+  };
+}
+
+/** Builds a group of extras and returns one animator for all of them. */
+function crowd(kit: WorldKit, parent: THREE.Object3D, specs: readonly ExtraSpec[]): (f: WorldFrame) => void {
+  const updaters = specs.map((s) => buildExtra(kit, parent, s));
+  return (f) => {
+    for (const u of updaters) u(f);
+  };
+}
+
+/** Lantern hanging from `hook`, swaying in the night breeze; its light rides along. */
+function hangingLantern(
+  kit: WorldKit,
+  parent: THREE.Object3D,
+  hook: Vec3,
+  drop: number,
+  opts: { intensity: number; distance: number; glow: number; seed: number; amplitude?: number },
+): { update: (frame: number) => number; body: THREE.Group } {
+  const pivot = new THREE.Group();
+  pivot.position.set(...hook);
+  parent.add(pivot);
+  kit.cyl(pivot, 0.005, 0.005, drop - 0.1, [0, -(drop - 0.1) / 2, 0], PALETTE.ink, { seg: 4, ink: false, shadow: false });
+  const body = new THREE.Group();
+  body.position.y = -drop;
+  pivot.add(body);
+  kit.hipRoof(body, 0.24, 0.24, 0.12, [0, 0.12, 0], PALETTE.brass);
+  kit.cyl(body, 0.07, 0.09, 0.22, [0, 0, 0], kit.lit('#ffd28a', { transparent: true, opacity: 0.75 }), { seg: 16, ink: false, shadow: false });
+  kit.cyl(body, 0.1, 0.12, 0.06, [0, -0.13, 0], PALETTE.brass, { seg: 16 });
+  const flame = kit.glow(body, '#ffcf7a', opts.glow, [0, 0, 0], 0.95);
+  const light = new THREE.PointLight('#ffae52', opts.intensity, opts.distance, 1.3);
+  body.add(light);
+  const amp = opts.amplitude ?? 0.07;
+  const ph = opts.seed * 1.7;
+  return {
+    body,
+    update: (frame: number) => {
+      const t = frame / 30;
+      // Two incommensurate gust frequencies so the swing never looks looped.
+      pivot.rotation.z = amp * Math.sin(t * 1.1 + ph) + amp * 0.35 * Math.sin(t * 2.7 + ph * 2);
+      pivot.rotation.x = amp * 0.6 * Math.sin(t * 0.8 + ph + 1);
+      const flick = 1 + Math.sin(frame * 0.9 + ph) * 0.07 + Math.sin(frame * 2.3 + 1) * 0.05 + Math.sin(frame * 5.1) * 0.02;
+      light.intensity = opts.intensity * flick;
+      flame.material.opacity = Math.min(1, 0.85 + (flick - 1) * 1.5);
+      return flick;
+    },
+  };
+}
+
+/** Porcelain teacup on a saucer with hot steam curling upward. */
+function teaCup(kit: WorldKit, parent: THREE.Object3D, pos: Vec3, seed: number): (frame: number) => void {
+  const g = new THREE.Group();
+  g.position.set(...pos);
+  parent.add(g);
+  const porcelain = kit.toonDouble('#f3efe6');
+  const blue = kit.toon('#3b5aa8');
+  kit.cyl(g, 0.078, 0.062, 0.012, [0, 0.006, 0], porcelain, { seg: 28, ink: 40 });
+  kit.mesh(g, new THREE.TorusGeometry(0.07, 0.004, 6, 28), blue, [0, 0.012, 0], { rot: [Math.PI / 2, 0, 0], ink: false });
+  kit.cyl(g, 0.05, 0.034, 0.056, [0, 0.04, 0], porcelain, { seg: 28, ink: 40 });
+  kit.mesh(g, new THREE.TorusGeometry(0.049, 0.0045, 6, 28), blue, [0, 0.066, 0], { rot: [Math.PI / 2, 0, 0], ink: false });
+  kit.mesh(g, new THREE.CircleGeometry(0.046, 24), '#7a3c12', [0, 0.06, 0], { rot: [-Math.PI / 2, 0, 0], ink: false, shadow: false });
+  kit.mesh(g, new THREE.TorusGeometry(0.018, 0.005, 6, 12, Math.PI * 1.2), porcelain, [0.052, 0.042, 0], { rot: [0, 0, -Math.PI * 0.6], ink: false });
+  const puffs: THREE.Sprite[] = [];
+  for (let i = 0; i < 8; i++) puffs.push(kit.puff(g, '#fff4e6'));
+  const period = 72;
+  return (frame: number) => {
+    const t = frame / 30;
+    puffs.forEach((s, i) => {
+      const c = (((frame + (i * period) / puffs.length + seed * 9) % period) + period) % period / period;
+      s.position.set(Math.sin(c * 5 + i * 1.7 + t) * 0.02 * (1 + 2 * c), 0.07 + c * 0.34, Math.cos(c * 4 + i) * 0.012 * (1 + 2 * c));
+      s.scale.setScalar(0.04 + c * 0.13);
+      s.material.opacity = Math.pow(Math.sin(Math.PI * c), 1.2) * 0.32;
+    });
+  };
+}
+
+/** Camera-locked foreground foliage that frames the top corners and slides out as the camera glides forward. */
+function foregroundCanopy(kit: WorldKit, parent: THREE.Object3D, seed: number): (f: WorldFrame) => void {
+  const leafCut = kit.track(new THREE.MeshToonMaterial({ map: kit.leafTexture(), gradientMap: kit.gradient, alphaTest: 0.5, side: THREE.DoubleSide, color: '#8fa08f' }));
+  const bark = kit.toon('#231a1e');
+  const rand = mulberry32(seed);
+  const clusters = [
+    { base: new THREE.Vector3(-0.4, 0.66, -1.7), out: new THREE.Vector3(-0.4, 0.75, 0.25) },
+    { base: new THREE.Vector3(0.46, 0.74, -2.2), out: new THREE.Vector3(0.45, 0.8, 0.35) },
+  ];
+  const groups = clusters.map((c, ci) => {
+    const g = new THREE.Group();
+    parent.add(g);
+    const sx = ci === 0 ? -1 : 1;
+    const branch = new THREE.CatmullRomCurve3([new THREE.Vector3(sx * 0.9, 0.55, 0), new THREE.Vector3(sx * 0.35, 0.12, 0.05), new THREE.Vector3(sx * 0.02, -0.08, 0)]);
+    const twig = kit.mesh(g, new THREE.TubeGeometry(branch, 12, 0.03, 6, false), bark, [0, 0, 0], { ink: false, shadow: false });
+    twig.castShadow = false;
+    const leaves: THREE.Mesh[] = [];
+    for (let i = 0; i < 26; i++) {
+      const leaf = new THREE.Mesh(kit.geo('x-fg-leaf', () => new THREE.PlaneGeometry(0.16, 0.3)), leafCut);
+      leaf.position.set(sx * (rand() * 0.75 - 0.15), rand() * 0.5 - 0.15, (rand() - 0.5) * 0.25);
+      leaf.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
+      g.add(leaf);
+      leaves.push(leaf);
+    }
+    return { g, c, leaves, rest: leaves.map((l) => l.rotation.clone()) };
+  });
+  const local = new THREE.Vector3();
+  return ({ camera, progress, frame }) => {
+    const t = frame / 30;
+    const k = easeOutCubic(smoothstep(0.02, 0.5, progress));
+    groups.forEach(({ g, c, leaves, rest }, i) => {
+      g.visible = k < 0.999;
+      local.copy(c.base).addScaledVector(c.out, k);
+      local.x += Math.sin(t * 0.9 + i) * 0.02;
+      local.y += Math.sin(t * 1.3 + i * 2) * 0.015;
+      g.position.copy(local).applyQuaternion(camera.quaternion).add(camera.position);
+      g.quaternion.copy(camera.quaternion);
+      g.rotateZ(Math.sin(t * 1.1 + i) * 0.05);
+      leaves.forEach((l, j) => {
+        const r = rest[j];
+        if (r) l.rotation.set(r.x + Math.sin(t * 2.2 + j) * 0.12, r.y + Math.sin(t * 1.7 + j * 0.5) * 0.08, r.z);
+      });
+    });
+  };
 }
 
 // ── Shot 1: Bandung 1923 at night ──────────────────────────────────────────
@@ -708,18 +1223,47 @@ function buildBandung1923(kit: WorldKit): WorldScene {
   kit.dualTone(g, { hemi: 1.1, key: PALETTE.moon, keyIntensity: 0.9, keyPos: [-12, 18, -30], keyTarget: [0, 0, -10], extent: 30 });
   const dust = kit.dust(g, [-4, 0.3, -26], [4, 5, 6], 380, '#ffd9a0', 0.05, 19);
 
+  // Porch lanterns under the langgar eaves, swaying in the night breeze.
+  const porch = [-1, 1].map((sx, i) => hangingLantern(kit, lg, [sx * 1.1, 3.62, 2.25], 0.5, { intensity: 2.6, distance: 5, glow: 1.0, seed: 3 + i, amplitude: 0.09 }));
+  // Warm spill from the langgar window onto the wet street, with dust caught in it.
+  kit.shaft(g, [0, 2.45, -24.1], [0, 0.05, -20.8], 1.5, '#ffbf6a', 0.16);
+  const windowMotes = kit.motes(g, { from: [0, 2.45, -24.1], to: [0, 0.05, -20.8], radius: 1.5, count: 160, color: '#ffd49a', size: 0.035, seed: 101 });
+  const lampMotes = [
+    [3.65, 3, -4],
+    [-3.65, 3, -12],
+    [3.65, 3, -20],
+  ].map(([x, y, z], i) => kit.motes(g, { from: [x ?? 0, y ?? 0, z ?? 0], radius: 1.3, count: 60, color: '#ffd9a0', size: 0.04, seed: 110 + i }));
+  const canopy = foregroundCanopy(kit, g, 23);
+  const street = crowd(kit, g, [
+    { pos: [1.4, 0, -6], yaw: Math.PI, pose: 'walk', headgear: 'caping', outfit: '#5a6a4a', lower: '#3a3326', prop: 'pikulan', speed: 0.018, seed: 1 },
+    { pos: [-1.9, 0, -24], yaw: 0, pose: 'walk', headgear: 'caping', outfit: '#7a5a3a', lower: '#2f2a22', prop: 'pikulan', speed: 0.02, seed: 2 },
+    { pos: [-0.7, 0, -10], yaw: Math.PI, pose: 'walk', headgear: 'peci', outfit: '#e9e2d0', lower: '#3b3a52', speed: 0.022, seed: 3 },
+    { pos: [2.4, 0, -27], yaw: 0, pose: 'walk', headgear: 'peci', outfit: '#d9cdb0', lower: '#4a3a2a', speed: 0.024, seed: 4 },
+    { pos: [-2.4, 0, -16], yaw: Math.PI, pose: 'walk', headgear: 'kerudung', outfit: '#8a3a3a', lower: '#5a2e3a', accent: '#efe4cf', speed: 0.015, seed: 5 },
+    { pos: [0.9, 0, 0], yaw: Math.PI, pose: 'walk', headgear: 'peci', outfit: '#4a5a7a', lower: '#2a2a3a', speed: 0.03, seed: 6 },
+    { pos: [-3.3, 0, -12], yaw: Math.PI / 2, pose: 'stand', headgear: 'peci', outfit: '#efe9da', lower: '#3a3448', seed: 7 },
+    { pos: [-2.75, 0, -12.2], yaw: -Math.PI / 2, pose: 'stand', headgear: 'bare', outfit: '#5a6a8a', lower: '#2a2a36', seed: 8 },
+    { pos: [1.0, 0, -22.8], yaw: Math.PI, pose: 'stand', headgear: 'turban', outfit: '#f2ede2', lower: '#3a3448', attentive: 0.4, seed: 9 },
+  ]);
+
   return {
     id: 'bandung1923',
     group: g,
     anchors: { windowLeft: new THREE.Vector3(-0.42, 1.55, -25.15), windowRight: new THREE.Vector3(0.42, 1.55, -25.15) },
     background: new THREE.Color('#0d0d2a'),
     fog: new THREE.Fog('#14143a', 18, 95),
-    update: ({ frame }) => {
+    update: (f) => {
+      const { frame } = f;
       const flick = 1 + Math.sin(frame * 0.7) * 0.05 + Math.sin(frame * 1.9 + 1) * 0.03;
       lampLights.forEach((l, i) => (l.intensity = (i === 2 ? 5 : 6) * (flick + i * 0.01)));
       glows.forEach((s, i) => (s.material.opacity = 0.8 + Math.sin(frame * 0.5 + i) * 0.05));
       lantern.intensity = 5 * (1 + Math.sin(frame * 0.9) * 0.08 + Math.sin(frame * 2.7) * 0.05);
       lanternGlow.material.opacity = 0.85 + Math.sin(frame * 0.9) * 0.08;
+      porch.forEach((p) => p.update(frame));
+      windowMotes(frame);
+      lampMotes.forEach((m) => m(frame, flick));
+      canopy(f);
+      street(f);
       dust(frame);
     },
   };
