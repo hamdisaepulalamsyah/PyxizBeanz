@@ -5,6 +5,7 @@ import { AbsoluteFill, Audio, type CalculateMetadataFunction, interpolate, stati
 import * as THREE from 'three';
 import {
   CAPTION_FRAMING,
+  COLOR_SCRIPT,
   type CaptionPage,
   type CastMember,
   CIKAJANG_DURATION_IN_FRAMES,
@@ -18,6 +19,7 @@ import {
   blendKeys,
   buildCaptionPages,
   captionPageAt,
+  crossfadeAt,
   cutDipAt,
   cutFlashAt,
   easeInCubic,
@@ -33,11 +35,13 @@ import {
   parseWords,
   sampleCamera,
   smoothstep,
+  snapKeys,
   stepped,
 } from './story';
 import { type ToonActor, WALK_PHASE_PER_METRE, createToonActor } from './toon';
 import { DIEGETIC_FONT_CSS, DIEGETIC_FONT_FACES, FONT_GUARD_MS } from './fonts';
-import { FilmPipeline, WorldKit, type WorldScene, buildWorld } from './worlds';
+import { FxLayer, disposeFxTextures, speedLineSet, speedLinesAt } from './fx';
+import { type FilmParams, FilmPipeline, WorldKit, type WorldScene, buildWorld } from './worlds';
 
 export type CikajangProps = {
   words: WordTiming[];
@@ -113,6 +117,19 @@ function freezeSun(group: THREE.Group, shot: (typeof SHOTS)[number]): void {
 interface Stage {
   world: WorldScene;
   cast: CastSlot[];
+  fx: FxLayer;
+  /** Unit vector from the scene toward the key (shadow-casting) light. */
+  keyDir: THREE.Vector3;
+}
+
+/** Direction toward the brightest shadow-casting directional light (the key). */
+function keyLightDir(group: THREE.Group): THREE.Vector3 {
+  let best: THREE.DirectionalLight | null = null;
+  group.traverse((o) => {
+    if (o instanceof THREE.DirectionalLight && (!best || (o.castShadow && !best.castShadow) || (o.castShadow === best.castShadow && o.intensity > best.intensity))) best = o;
+  });
+  const key = best as THREE.DirectionalLight | null;
+  return key ? key.position.clone().sub(key.target.position).normalize() : new THREE.Vector3(1, 1, 1).normalize();
 }
 
 /** Builds each shot's world + cast on first use and keeps only the active one visible. */
@@ -121,6 +138,7 @@ class StageManager {
   private readonly kit = new WorldKit();
   private readonly stages = new Map<number, Stage>();
   private actors: ToonActor[] = [];
+  private fxLayers: FxLayer[] = [];
   private blobGeo: THREE.CircleGeometry | null = null;
   private blobMat: THREE.MeshBasicMaterial | null = null;
 
@@ -178,8 +196,11 @@ class StageManager {
       return { member, actor, anchor: anchor.clone(), blob };
     });
     world.group.visible = false;
+    const fx = new FxLayer(index);
+    world.group.add(fx.group);
+    this.fxLayers.push(fx);
     this.root.add(world.group);
-    const stage = { world, cast };
+    const stage = { world, cast, fx, keyDir: keyLightDir(world.group) };
     this.stages.set(index, stage);
     return stage;
   }
@@ -191,6 +212,9 @@ class StageManager {
   dispose(): void {
     for (const a of this.actors) a.dispose();
     this.actors = [];
+    for (const f of this.fxLayers) f.dispose();
+    this.fxLayers = [];
+    disposeFxTextures();
     this.blobGeo?.dispose();
     this.blobMat?.map?.dispose();
     this.blobMat?.dispose();
@@ -202,6 +226,7 @@ class StageManager {
 const offsetNow = new THREE.Vector3();
 const offsetPrev = new THREE.Vector3();
 const offsetStart = new THREE.Vector3();
+const camRight = new THREE.Vector3();
 
 const CikajangScene: React.FC = () => {
   const frame = useCurrentFrame();
@@ -211,7 +236,7 @@ const CikajangScene: React.FC = () => {
   const manager = useMemo(() => new StageManager(), []);
   const film = useMemo(() => new FilmPipeline(width, height), [width, height]);
   const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35, roll: 0, focus: 5 }), []);
-  const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0, sepia: 0, grey: 0, tone: 0.4, flash: 0 });
+  const filmParams = useRef<FilmParams>({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0, sepia: 0, grey: 0, tone: 0.4, flash: 0 });
 
   useLayoutEffect(() => {
     scene.add(manager.root);
@@ -228,65 +253,94 @@ const CikajangScene: React.FC = () => {
     [manager, film],
   );
 
+  // Poses world, camera, cast and FX for `frame` and returns its film params.
+  // Pure in `frame`, so it can run twice per frame during a cross-dissolve.
+  const poseAt = useMemo(
+    () =>
+      (f: number, cam: THREE.PerspectiveCamera): FilmParams => {
+        const { shot, index, localFrame, progress } = getShotAt(f);
+        const stage = manager.get(index);
+        manager.show(index);
+        scene.background = stage.world.background;
+        scene.fog = stage.world.fog;
+
+        sampleCamera(f, sample);
+        cam.position.copy(sample.position);
+        cam.lookAt(sample.target);
+        cam.rotateZ(sample.roll);
+        cam.fov = sample.fov;
+        cam.near = 0.05;
+        cam.far = 400;
+        cam.updateProjectionMatrix();
+        cam.updateMatrixWorld();
+
+        stage.world.update({ frame: f, localFrame, progress, fps, camera: cam });
+        const len = Math.max(1, shot.to - shot.from - 1);
+        const palette = COLOR_SCRIPT[shot.phase];
+        // Which screen side the key light comes from, for crescent shade / rim / ink weight.
+        camRight.setFromMatrixColumn(cam.matrixWorld, 0);
+        const light = { rim: palette.rim, rimStrength: palette.rimStrength, side: stage.keyDir.dot(camRight) >= 0 ? 1 : -1 };
+        for (const slot of stage.cast) {
+          const { member, actor, anchor, blob } = slot;
+          actor.mesh.visible = isCastVisible(member, progress);
+          blob.visible = actor.mesh.visible;
+          if (!actor.mesh.visible) continue;
+          // Keyed walk path: legs cycle with distance travelled, so feet never skate.
+          keyedVec3(member.move, progress, offsetNow);
+          keyedVec3(member.move, Math.max(0, progress - 1 / len), offsetPrev);
+          keyedVec3(member.move, 0, offsetStart);
+          actor.mesh.position.copy(anchor).add(offsetNow);
+          blob.position.copy(actor.mesh.position).add(BLOB_LIFT);
+          const moving = member.move ? offsetNow.distanceTo(offsetPrev) > 0.0015 : false;
+          const travelled = offsetNow.distanceTo(offsetStart);
+          // Snappy expression swap: 2-frame change exactly on the beat, with a blink.
+          const expr = snapKeys(member.expression, 'neutral', progress, len);
+          actor.update(
+            {
+              frame: f,
+              progress,
+              expression: { from: expr.from, to: expr.to, mix: expr.mix },
+              expressionAge: expr.age,
+              light,
+              turn: keyed(member.turn ?? [[0, 0]], progress),
+              nod: keyed(member.nod ?? [[0, 0]], progress),
+              armRight: blendKeys(member.right, 'side', progress),
+              armLeft: blendKeys(member.left, 'side', progress),
+              walkPhase: moving ? (travelled / member.scale) * WALK_PHASE_PER_METRE : null,
+              walkDir: offsetNow.x >= offsetPrev.x ? 1 : -1,
+              drawProgress: smoothstep(0.06, 0.62, progress),
+            },
+            cam.position,
+          );
+        }
+        stage.fx.update(
+          f,
+          cam,
+          stage.cast.map(({ member, actor }) => ({ position: actor.mesh.position, scale: member.scale, visible: actor.mesh.visible })),
+        );
+
+        const grade = gradeAt(f);
+        return { focusDistance: sample.focus, aperture: apertureAt(f), frame: f, dip: cutDipAt(f), sepia: grade.sepia, grey: grade.grey, tone: grade.tone, flash: cutFlashAt(f) };
+      },
+    [fps, scene, manager, sample],
+  );
+
   // Layout effect: runs before <ThreeCanvas>' frame renderer calls advance().
   useLayoutEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
-    const { shot, index, localFrame, progress } = getShotAt(frame);
-    const stage = manager.get(index);
-    manager.show(index);
-    scene.background = stage.world.background;
-    scene.fog = stage.world.fog;
-
-    sampleCamera(frame, sample);
-    camera.position.copy(sample.position);
-    camera.lookAt(sample.target);
-    camera.rotateZ(sample.roll);
-    camera.fov = sample.fov;
-    camera.near = 0.05;
-    camera.far = 400;
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld();
-
-    stage.world.update({ frame, localFrame, progress, fps, camera });
-    const len = Math.max(1, shot.to - shot.from - 1);
-    for (const { member, actor, anchor, blob } of stage.cast) {
-      actor.mesh.visible = isCastVisible(member, progress);
-      blob.visible = actor.mesh.visible;
-      if (!actor.mesh.visible) continue;
-      // Keyed walk path: legs cycle with distance travelled, so feet never skate.
-      keyedVec3(member.move, progress, offsetNow);
-      keyedVec3(member.move, Math.max(0, progress - 1 / len), offsetPrev);
-      keyedVec3(member.move, 0, offsetStart);
-      actor.mesh.position.copy(anchor).add(offsetNow);
-      blob.visible = true;
-      blob.position.copy(actor.mesh.position).add(BLOB_LIFT);
-      const moving = member.move ? offsetNow.distanceTo(offsetPrev) > 0.0015 : false;
-      const travelled = offsetNow.distanceTo(offsetStart);
-      actor.update(
-        {
-          frame,
-          progress,
-          expression: blendKeys(member.expression, 'neutral', progress, 0.04),
-          turn: keyed(member.turn ?? [[0, 0]], progress),
-          nod: keyed(member.nod ?? [[0, 0]], progress),
-          armRight: blendKeys(member.right, 'side', progress),
-          armLeft: blendKeys(member.left, 'side', progress),
-          walkPhase: moving ? (travelled / member.scale) * WALK_PHASE_PER_METRE : null,
-          walkDir: offsetNow.x >= offsetPrev.x ? 1 : -1,
-          drawProgress: smoothstep(0.06, 0.62, progress),
-        },
-        camera.position,
-      );
-    }
-
-    const grade = gradeAt(frame);
-    filmParams.current = { focusDistance: sample.focus, aperture: apertureAt(frame), frame, dip: cutDipAt(frame), sepia: grade.sepia, grey: grade.grey, tone: grade.tone, flash: cutFlashAt(frame) };
-  }, [frame, fps, camera, scene, manager, sample]);
+    filmParams.current = poseAt(frame, camera);
+  }, [frame, camera, poseAt]);
 
   // Priority 1 takes over rendering from R3F so the film pass runs last.
   useFrame(({ gl, scene: s, camera: c }) => {
     if (!(c instanceof THREE.PerspectiveCamera)) return;
     film.setSize(width, height);
+    const xf = crossfadeAt(frame);
+    if (xf) {
+      // Cross-dissolve: finish the outgoing shot's last frame first, then re-pose the current one.
+      film.renderPrev(gl, s, c, poseAt(xf.prevFrame, c));
+      filmParams.current = { ...poseAt(frame, c), xfade: xf.weight };
+    }
     film.render(gl, s, c, filmParams.current);
   }, 1);
 

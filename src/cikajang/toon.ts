@@ -46,6 +46,10 @@ const OUTLINE = 11;
 const HIP_Y = SOLE - HEAD_H_PX * 1.35;
 const TORSO_TOP = HIP_Y - HEAD_H_PX * 1.1;
 const HEAD_CY = TORSO_TOP - HEAD_HALF_H * HEAD_SCALE + 8;
+/** Head centre height above the sole and head half-height, in metres at scale 1 (FX anchors). */
+export const HEAD_CENTER_M = (SOLE - HEAD_CY) / PX;
+export const HEAD_HALF_H_M = (HEAD_HALF_H * HEAD_SCALE) / PX;
+export const HEAD_HALF_W_M = (HEAD_HALF_W * HEAD_SCALE) / PX;
 /** Seated hip line (thighs foreshortened toward camera). */
 const SEAT_Y = HIP_Y + 40;
 /** Desk line on the card for seated writing poses. */
@@ -225,6 +229,13 @@ export interface ToonDrive {
   walkDir: number;
   /** 0..1 progress of the chalk line on the lap board. */
   drawProgress: number;
+  /** Frames since the current expression key began (snappy swap + blink); large = settled. */
+  expressionAge?: number;
+  /**
+   * Scene light for the card (color script): rim tint + strength, and which
+   * screen side the key light comes from (−1 = left, +1 = right).
+   */
+  light?: { rim: string; rimStrength: number; side: number };
 }
 
 export interface ActorSetup {
