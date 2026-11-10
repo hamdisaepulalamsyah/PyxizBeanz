@@ -133,7 +133,64 @@ export type HandProp = 'none' | 'pen' | 'chalk' | 'whistle' | 'signalLamp' | 'ha
 /** Larger props carried by the body and gripped by the hands. */
 export type BodyProp = 'none' | 'backpack' | 'shoulderBasket' | 'lapSack' | 'lapBakul' | 'lapBoard' | 'newspaper' | 'deskNotebook';
 
-export type Expression = 'neutral' | 'warm' | 'serious' | 'thinking' | 'sad' | 'wonder';
+export type Expression = 'neutral' | 'warm' | 'serious' | 'thinking' | 'sad' | 'wonder' | 'smirk' | 'shock' | 'laugh';
+
+/** Frames an expression swap takes: snappy, never a slow morph (skill v2.2 §3). */
+export const EXPRESSION_SNAP_FRAMES = 2;
+
+// ── Color script (skill v2.2 §5.4): lighting narrates the story ─────────────
+
+export type ColorPhase = 'goldenDusk' | 'mountainMorning' | 'colonialWarm' | 'crisisCold' | 'closureGrey' | 'todayBright' | 'climaxGold';
+
+export interface ColorScriptEntry {
+  /** What the phase means in the story. */
+  mood: string;
+  /** Key light colour (sun / lamp). */
+  key: string;
+  /** Shadow colour — indigo / lavender / amber, never dead grey. */
+  shadow: string;
+  /** Rim-light tint painted on character cards (follows the key). */
+  rim: string;
+  /** Rim strength 0..1 on the character cards. */
+  rimStrength: number;
+  /** Emissive glow tint for hero props (lanterns, carved letters). */
+  glow: string;
+  /** Atmosphere: fog / haze tint. */
+  haze: string;
+}
+
+/**
+ * Phase → shots: goldenDusk 1 · mountainMorning 2–3 · colonialWarm 4–7 (heyday, sepia) ·
+ * crisisCold 8 · closureGrey 9 · todayBright 10–12 · climaxGold 13 (twilight, carving glows).
+ * Rim light on the cast cards and the world lighting rigs follow these entries.
+ */
+export const COLOR_SCRIPT: Readonly<Record<ColorPhase, ColorScriptEntry>> = {
+  goldenDusk: { mood: 'Pembuka / harapan — senja emas di pintu tua', key: '#ffa550', shadow: '#2c1f4a', rim: '#ffc27a', rimStrength: 0.85, glow: '#ffd27a', haze: '#e8a070' },
+  mountainMorning: { mood: 'Pagi pegunungan berkicau, embun & kabut berlapis', key: '#fff1d6', shadow: '#4a5a8a', rim: '#fff4e0', rimStrength: 0.55, glow: '#fff0c8', haze: '#c8d8e4' },
+  colonialWarm: { mood: 'Kejayaan 1930-an — amber hangat, debu berkilau', key: '#ffcf8a', shadow: '#4a2f3a', rim: '#ffd59a', rimStrength: 0.7, glow: '#ffc060', haze: '#d8b080' },
+  crisisCold: { mood: 'Krisis 1980-an — neon dingin, sorot sempit', key: '#d8e4d0', shadow: '#2a3050', rim: '#a8c4e0', rimStrength: 0.5, glow: '#e4ecd4', haze: '#7a8478' },
+  closureGrey: { mood: 'Penutupan 1982 — kelabu biru-ungu', key: '#c8cce0', shadow: '#3a3458', rim: '#9aa4d0', rimStrength: 0.45, glow: '#b8b0d8', haze: '#8a8aa0' },
+  todayBright: { mood: 'Masa kini — cerah segar, langit biru', key: '#fff6e4', shadow: '#3c4a7a', rim: '#ffffff', rimStrength: 0.6, glow: '#fff4d8', haze: '#cfe2f0' },
+  climaxGold: { mood: 'Klimaks — twilight emas kontras tinggi, ukiran menyala', key: '#ff9a40', shadow: '#24183e', rim: '#ffb860', rimStrength: 1, glow: '#ffcc66', haze: '#d88a60' },
+};
+
+// ── Cartoon FX cues (skill v2.2 §4.3) ───────────────────────────────────────
+
+export type FxKind = 'sweat' | 'speedLines' | 'spark' | 'question' | 'exclaim' | 'zzz';
+
+export interface FxCue {
+  kind: FxKind;
+  /** Shot progress (0..1) at which the effect pops in. */
+  at: number;
+  /** Lifetime in frames. */
+  frames: number;
+  /** Cast index the effect sticks to (head-relative); omit for screen FX / `pos`. */
+  cast?: number;
+  /** Fixed world position when not attached to a cast member. */
+  pos?: Vec3;
+  /** Size multiplier (default 1). */
+  size?: number;
+}
 
 export interface CameraKey {
   t: number;
@@ -181,8 +238,12 @@ export interface Shot {
   /** Exclusive end frame. */
   to: number;
   world: WorldId;
-  /** Transition into this shot. */
-  cut: 'dip' | 'hard' | 'flash';
+  /** Transition into this shot. `xfade` = XFADE_FRAMES soft cross-dissolve. */
+  cut: 'dip' | 'hard' | 'flash' | 'xfade';
+  /** Color-script phase (COLOR_SCRIPT) — drives rim light on the cast. */
+  phase: ColorPhase;
+  /** Cartoon 2D FX on key story beats only. */
+  fx?: readonly FxCue[];
   chip: Keys<{ place: string; year: string }>;
   camera: readonly CameraKey[];
   /** Bokeh strength keys (0 = sharp, 1 = very shallow). */
@@ -205,6 +266,22 @@ const SEPIA: Grade = { sepia: [[0, 0.92]] };
 /** Present-day lead: denim jacket, hijab, backpack, sneakers. */
 const dinda = (m: Omit<CastMember, 'actor' | 'scale'> & { scale?: number }): CastMember => ({ actor: 'dinda', scale: 1.25, bodyProp: 'backpack', ...m });
 
+// ── Beat helper ─────────────────────────────────────────────────────────────
+
+/** Shot boundaries (frames) — `from` of each shot plus the end of the film. */
+const SHOT_EDGES = [0, 240, 540, 840, 1140, 1410, 1680, 1980, 2280, 2580, 2850, 3120, 3390, 3640] as const;
+
+/**
+ * Shot progress of an absolute film frame inside shot `n` (1-based), so expression
+ * and FX keys are written against `words.json` frames (round(sec × 30)) and sit
+ * 0–3 frames BEFORE the narrated keyword.
+ */
+function beat(n: number, frame: number): number {
+  const a = SHOT_EDGES[n - 1] ?? 0;
+  const b = SHOT_EDGES[n] ?? a + 1;
+  return Math.round(clamp01((frame - a) / (b - a - 1)) * 10000) / 10000;
+}
+
 export const SHOTS: readonly Shot[] = [
   // 1 — Rear door at golden dusk: Dinda traces the carved "1930 – 1982".
   {
@@ -213,24 +290,39 @@ export const SHOTS: readonly Shot[] = [
     to: 240,
     world: 'stationRear',
     cut: 'hard',
+    phase: 'goldenDusk',
     chip: [[0, { place: 'STASIUN CIKAJANG', year: 'KINI' }]],
-    aperture: [[0, 0.6], [0.5, 0.5], [1, 0.45]],
-    // 3/4 medium shot from the right: Dinda's head, hijab, backpack and the arm reaching
-    // from her shoulder to the carving all stay in frame, then a slow dolly-out.
+    aperture: [[0, 0.7], [0.1, 0.62], [0.3, 0.5], [1, 0.45]],
+    // MACRO HOOK (0–1 s): extreme close-up of the carved "1930 – 1982" (plaque centre sits ~57 % down the
+    // frame, below the title overlay) with Dinda's mitten resting on the plaque's lower edge, never on the
+    // digits; impact slam at HOOK.impactFrame, then a smootherstep pull-back to a medium shot of Dinda,
+    // a push-in on the dates while they are read, and a slow dolly-out. Shot size changes every ~2–3 s.
     camera: [
-      { t: 0, pos: [0.42, 1.3, 2.4], target: [-0.02, 1.1, -0.8], fov: 38 },
-      { t: 0.45, pos: [0.55, 1.38, 3.1], target: [0.06, 1.1, -0.8], fov: 38 },
-      { t: 1, pos: [0.62, 1.5, 4.8], target: [0.2, 1.08, -0.8], fov: 38 },
+      { t: 0, pos: [0.34, 1.26, 2.35], target: [-0.1, 1.2, -0.88], fov: 30 },
+      { t: 0.075, pos: [0.35, 1.27, 2.4], target: [-0.1, 1.2, -0.88], fov: 30 },
+      { t: 0.27, pos: [0.6, 1.4, 3.6], target: [0.15, 1.15, -0.8], fov: 36 },
+      { t: 0.42, pos: [0.3, 1.3, 3.0], target: [-0.08, 1.14, -0.85], fov: 30 },
+      { t: 0.72, pos: [0.55, 1.4, 3.9], target: [0.15, 1.12, -0.8], fov: 36 },
+      { t: 1, pos: [0.7, 1.5, 4.8], target: [0.3, 1.08, -0.8], fov: 38 },
+    ],
+    // Glint on the plaque's top corner right after the cut, speed lines on the slam.
+    fx: [
+      { kind: 'spark', at: 0.02, frames: 16, pos: [0.18, 1.3, -0.8], size: 0.6 },
+      { kind: 'speedLines', at: beat(1, HOOK.impactFrame), frames: 10 },
     ],
     grade: { sepia: [[0, 0]], tone: 0.6 },
     cast: [
       dinda({
         anchor: 'dindaTrace',
         pose: 'stand',
-        expression: [[0, 'thinking'], [0.6, 'wonder']],
-        right: [[0, 'trace']],
+        // "terukir dua angka" (56) → wonder; "1982." (176) → serious.
+        expression: [[0, 'thinking'], [beat(1, 54), 'wonder'], [beat(1, 174), 'serious']],
+        // Hand traces BELOW the carving (traceLow) so the digits stay 100 % free; Dinda is nudged right so
+        // her torso stays off the plaque.
+        right: [[0, 'traceLow']],
         left: [[0, 'strap'], [0.72, 'strap'], [0.82, 'palm']],
         turn: [[0, -0.55], [0.55, -0.45], [0.85, 0]],
+        move: [[0, [0.2, 0, 0]]],
       }),
     ],
   },
@@ -241,11 +333,23 @@ export const SHOTS: readonly Shot[] = [
     to: 540,
     world: 'platformMist',
     cut: 'dip',
+    phase: 'mountainMorning',
     chip: [[0, { place: 'PERON CIKAJANG', year: '1.246 MDPL' }]],
-    aperture: [[0, 0.55], [0.7, 0.4], [1, 0.25]],
+    // Rack focus: opens on the soft foreground leaves (bokeh up), snaps to Dinda by ~0.9 s, then follows the crane.
+    aperture: [[0, 0.85], [0.1, 0.8], [0.18, 0.55], [0.7, 0.4], [1, 0.25]],
+    focus: [
+      [0, [0.5, 2.3, 0.69]],
+      [0.07, [0.5, 2.3, 0.69]],
+      [0.17, [0, 1.6, -1.5]],
+      [0.45, [-0.6, 1.6, -1.6]],
+      [0.75, [-0.4, 3.6, -12]],
+      [1, [0, 9.5, -60]],
+    ],
+    // MCU on Dinda → low angle up at the elevation sign → crane up to the slopes.
     camera: [
       { t: 0, pos: [0.5, 1.45, 3.6], target: [-0.3, 1.45, -1.6], fov: 40 },
-      { t: 0.45, pos: [0.2, 1.6, 3.9], target: [-0.6, 1.6, -1.6], fov: 40 },
+      { t: 0.3, pos: [0.3, 1.0, 3.7], target: [-0.45, 2.1, -1.7], fov: 42 },
+      { t: 0.5, pos: [0.2, 1.6, 3.9], target: [-0.6, 1.6, -1.6], fov: 40 },
       { t: 0.75, pos: [0.0, 3.4, 5.2], target: [-0.4, 3.6, -12], fov: 42 },
       { t: 1, pos: [0.0, 6.6, 6.2], target: [0, 9.5, -60], fov: 44 },
     ],
@@ -254,7 +358,8 @@ export const SHOTS: readonly Shot[] = [
       dinda({
         anchor: 'dinda',
         pose: 'stand',
-        expression: [[0, 'neutral'], [0.15, 'warm']],
+        // "tertinggi" (413) → wonder; "Apa yang terjadi" (470) → thinking.
+        expression: [[0, 'neutral'], [0.15, 'warm'], [beat(2, 411), 'wonder'], [beat(2, 468), 'thinking']],
         right: [[0, 'side'], [0.16, 'pointHigh'], [0.52, 'pointHigh'], [0.62, 'palm'], [0.8, 'palm'], [0.9, 'side']],
         left: [[0, 'strap']],
         turn: [[0, -0.6], [0.12, 0]],
@@ -270,6 +375,7 @@ export const SHOTS: readonly Shot[] = [
     to: 840,
     world: 'ladang',
     cut: 'flash',
+    phase: 'mountainMorning',
     chip: [[0, { place: 'LERENG CIKAJANG', year: '1930-AN' }]],
     aperture: [[0, 0.5]],
     camera: [
@@ -311,6 +417,7 @@ export const SHOTS: readonly Shot[] = [
     to: 1140,
     world: 'office1930',
     cut: 'dip',
+    phase: 'colonialWarm',
     chip: [[0, { place: 'KANTOR STASIUN', year: '31 JULI 1930' }]],
     aperture: [[0, 0.55], [0.7, 0.7], [1, 0.9]],
     camera: [
@@ -353,6 +460,7 @@ export const SHOTS: readonly Shot[] = [
     to: 1410,
     world: 'cibatu',
     cut: 'dip',
+    phase: 'colonialWarm',
     kicks: [0.2],
     chip: [[0, { place: 'STASIUN CIBATU', year: '06.04' }]],
     aperture: [[0, 0.5], [0.5, 0.35], [1, 0.4]],
@@ -388,6 +496,7 @@ export const SHOTS: readonly Shot[] = [
     to: 1680,
     world: 'carriage',
     cut: 'dip',
+    phase: 'colonialWarm',
     chip: [[0, { place: 'GERBONG KELAS III', year: '08.25' }]],
     aperture: [[0, 0.45]],
     camera: [
@@ -411,6 +520,7 @@ export const SHOTS: readonly Shot[] = [
     to: 1980,
     world: 'garut1935',
     cut: 'dip',
+    phase: 'colonialWarm',
     flashes: [0.51],
     chip: [
       [0, { place: 'STASIUN GARUT', year: '1935' }],
@@ -446,6 +556,7 @@ export const SHOTS: readonly Shot[] = [
     to: 2280,
     world: 'office1980',
     cut: 'dip',
+    phase: 'crisisCold',
     roll: [[0, 0], [0.55, 0], [1, -3]],
     chip: [[0, { place: 'KANTOR STASIUN', year: 'AWAL 1980-AN' }]],
     aperture: [[0, 0.5], [0.55, 0.75], [1, 0.95]],
@@ -481,6 +592,7 @@ export const SHOTS: readonly Shot[] = [
     to: 2580,
     world: 'garut1982',
     cut: 'dip',
+    phase: 'closureGrey',
     kicks: [0.73],
     roll: [[0, 0], [0.62, 0], [0.85, -3.5], [1, -4]],
     chip: [[0, { place: 'STASIUN GARUT', year: '1982' }]],
@@ -515,6 +627,7 @@ export const SHOTS: readonly Shot[] = [
     to: 2850,
     world: 'cikajangToday',
     cut: 'flash',
+    phase: 'todayBright',
     chip: [[0, { place: 'STASIUN CIKAJANG', year: 'KINI' }]],
     aperture: [[0, 0.3], [1, 0.45]],
     camera: [
@@ -542,6 +655,7 @@ export const SHOTS: readonly Shot[] = [
     to: 3120,
     world: 'cikajangToday',
     cut: 'dip',
+    phase: 'todayBright',
     chip: [[0, { place: 'UKIRAN', year: '“STATION TJIKADJANG”' }]],
     aperture: [[0, 0.7], [1, 0.75]],
     // Wide-enough medium shot: the WHOLE "Station Tjikadjang" carving stays inside 82 % of the frame width
@@ -572,6 +686,7 @@ export const SHOTS: readonly Shot[] = [
     to: 3390,
     world: 'garut2022',
     cut: 'flash',
+    phase: 'todayBright',
     chip: [[0, { place: 'STASIUN GARUT', year: '2022' }]],
     aperture: [[0, 0.4]],
     camera: [
@@ -605,6 +720,7 @@ export const SHOTS: readonly Shot[] = [
     to: 3640,
     world: 'stationRear',
     cut: 'dip',
+    phase: 'climaxGold',
     kicks: [0.56],
     roll: [[0, 0], [0.5, 0], [1, 3]],
     chip: [[0, { place: 'STASIUN CIKAJANG', year: '20??' }]],
@@ -678,6 +794,40 @@ export function cutDipAt(frame: number): number {
 
 /** 6-frame white flash on era jumps: `flash` cuts plus in-shot `flashes`. */
 export const FLASH_FRAMES = 6;
+
+/** 0.5 s cross-dissolve after the cut for `xfade` shots. */
+export const XFADE_FRAMES = 15;
+
+/**
+ * Cross-dissolve state at `frame`: for XFADE_FRAMES after an `xfade` cut the
+ * outgoing shot's last frame (`prevFrame`) is blended over the incoming shot,
+ * weight 1 → 0 with smoothstep. Otherwise null. Pure function of frame.
+ */
+export function crossfadeAt(frame: number): { prevIndex: number; prevFrame: number; weight: number } | null {
+  for (let i = 1; i < SHOTS.length; i++) {
+    const s = SHOTS[i];
+    if (!s || s.cut !== 'xfade') continue;
+    const d = frame - s.from;
+    if (d >= 0 && d < XFADE_FRAMES) return { prevIndex: i - 1, prevFrame: s.from - 1, weight: 1 - smoothstep(0, XFADE_FRAMES, d + 0.5) };
+  }
+  return null;
+}
+
+/** Index of the expression key active at `progress` and frames since it began (blink on swap). */
+export function snapKeys<T>(keys: Keys<T> | undefined, fallback: T, progress: number, shotLen: number): { from: T; to: T; mix: number; age: number } {
+  const first = keys?.[0];
+  if (!keys || !first) return { from: fallback, to: fallback, mix: 0, age: 1e6 };
+  let prev = first[1];
+  let cur = first;
+  for (let i = 1; i < keys.length; i++) {
+    const k = keys[i];
+    if (!k || progress < k[0]) break;
+    prev = cur[1];
+    cur = k;
+  }
+  const age = cur === first ? 1e6 : (progress - cur[0]) * shotLen;
+  return { from: prev, to: cur[1], mix: clamp01(age / EXPRESSION_SNAP_FRAMES), age };
+}
 
 export function cutFlashAt(frame: number): number {
   let f = 0;
