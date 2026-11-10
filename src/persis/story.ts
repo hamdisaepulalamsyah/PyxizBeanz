@@ -102,6 +102,11 @@ export type WorldId =
 
 export type CharacterId = 'zamzam' | 'yunus' | 'hassan' | 'soekarno' | 'natsir';
 export type Expression = 'neutral' | 'respect' | 'serious' | 'thinking' | 'warm';
+/** Body framing: torso bust (hidden behind a sill/table) or a full figure standing / seated on a bench / cross-legged. */
+export type Stance = 'bust' | 'stand' | 'bench' | 'bersila';
+/** Where both hands rest when no action drives them. */
+export type HandRest = 'side' | 'lap' | 'desk' | 'lectern';
+export type Carry = 'none' | 'papers' | 'magazine' | 'kitab' | 'pikulan';
 
 /** A camera pose at local shot progress `t` (0..1). Positions are splined, fov is eased. */
 export interface CameraKey {
@@ -127,6 +132,15 @@ export interface CastMember {
   gesture?: readonly (readonly [number, number])[];
   /** Respectful head bow 0..1. */
   nod?: readonly (readonly [number, number])[];
+  stance?: Stance;
+  hands?: HandRest;
+  carry?: Carry;
+  /** Progress windows where the right hand writes (pen on paper). */
+  writing?: readonly (readonly [number, number])[];
+  /** Progress windows where the left hand makes an open-palm explaining gesture. */
+  explain?: readonly (readonly [number, number])[];
+  /** Raised index finger ("dalil") or an open releasing palm. */
+  gestureHand?: 'point' | 'open';
 }
 
 export interface Shot {
@@ -179,7 +193,10 @@ export const SHOTS: readonly Shot[] = [
         actor: 'zamzam',
         anchor: 'seatLeft',
         scale: 1.15,
+        stance: 'bersila',
+        hands: 'desk',
         speaking: [[0.05, 0.5]],
+        explain: [[0.06, 0.2], [0.4, 0.5]],
         expression: [[0, 'respect'], [0.3, 'serious'], [0.55, 'respect']],
         turn: [[0, 0.15], [0.45, 0.35], [0.6, 0.45]],
         gesture: [[0, 0], [0.18, 0], [0.24, 1], [0.38, 1], [0.45, 0]],
@@ -188,7 +205,10 @@ export const SHOTS: readonly Shot[] = [
         actor: 'yunus',
         anchor: 'seatRight',
         scale: 1.15,
+        stance: 'bersila',
+        hands: 'desk',
         speaking: [[0.55, 0.98]],
+        explain: [[0.62, 0.9]],
         expression: [[0, 'warm'], [0.5, 'thinking'], [0.62, 'serious'], [0.9, 'respect']],
         turn: [[0, -0.35], [0.5, -0.2], [0.65, -0.1]],
         nod: [[0, 0], [0.08, 0.6], [0.14, 0], [0.92, 0], [0.97, 0.7]],
@@ -212,7 +232,10 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'hassan',
         anchor: 'desk',
-        scale: 1.1,
+        scale: 1.0,
+        stance: 'bench',
+        hands: 'desk',
+        writing: [[-0.1, 0.5]],
         visible: [0, 0.55],
         speaking: [],
         expression: [[0, 'thinking'], [0.3, 'serious']],
@@ -221,9 +244,12 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'hassan',
         anchor: 'podium',
-        scale: 1.15,
+        scale: 0.95,
+        stance: 'stand',
+        hands: 'lectern',
         visible: [0.55, 1],
         speaking: [[0.6, 1]],
+        explain: [[0.6, 0.68], [0.88, 1]],
         expression: [[0.55, 'serious'], [0.85, 'warm']],
         turn: [[0.55, -0.15], [0.8, 0.1]],
         gesture: [[0.6, 0], [0.7, 1], [0.95, 1]],
@@ -246,7 +272,9 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'hassan',
         anchor: 'operator',
-        scale: 1.1,
+        scale: 0.95,
+        stance: 'stand',
+        carry: 'magazine',
         speaking: [[0.1, 0.55]],
         expression: [[0, 'serious'], [0.5, 'warm']],
         turn: [[0, 0.4], [0.5, 0.2], [0.8, 0.5]],
@@ -270,7 +298,11 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'soekarno',
         anchor: 'underTree',
-        scale: 1.2,
+        scale: 1.0,
+        stance: 'bench',
+        hands: 'desk',
+        writing: [[-0.1, 0.3]],
+        gestureHand: 'open',
         speaking: [[0.04, 0.36]],
         expression: [[0, 'thinking'], [0.2, 'serious'], [0.42, 'warm']],
         turn: [[0, -0.3], [0.3, -0.1], [0.45, 0.45], [1, 0.55]],
@@ -293,7 +325,8 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'hassan',
         anchor: 'platform',
-        scale: 1.05,
+        scale: 0.95,
+        stance: 'stand',
         speaking: [],
         expression: [[0, 'warm']],
         turn: [[0, 0.5], [0.6, 0.2]],
@@ -318,8 +351,11 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'natsir',
         anchor: 'podium',
-        scale: 1.15,
+        scale: 0.95,
+        stance: 'stand',
+        hands: 'lectern',
         speaking: [[0.05, 0.6]],
+        explain: [[0.05, 0.14], [0.5, 0.6]],
         expression: [[0, 'serious'], [0.45, 'respect'], [0.75, 'warm']],
         turn: [[0, 0], [0.3, 0.2], [0.5, -0.1]],
         gesture: [[0.15, 0], [0.22, 1], [0.4, 1], [0.48, 0]],

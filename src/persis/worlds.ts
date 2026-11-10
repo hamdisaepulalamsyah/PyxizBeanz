@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
-import type { Vec3, WorldId } from './story';
-import { clamp01, easeOutCubic, lerp, nodPulseAt, smoothstep } from './story';
+import type { Carry, Expression, Stance, Vec3, WorldId } from './story';
+import { clamp01, easeOutCubic, hash01, lerp, smoothstep } from './story';
+import { type ArmDrive, type CharacterLook, type Headwear, type Outfit, createToonActor, visemeAt } from './toon';
 
 /**
  * Three.js worlds for "Sejarah Persis: Dalilnya Mana?" plus the film pipeline
@@ -82,8 +83,6 @@ export class WorldKit {
   private softTexture: THREE.CanvasTexture | null = null;
   private readonly geoCache = new Map<string, THREE.BufferGeometry>();
   private readonly doubleCache = new Map<string, THREE.MeshToonMaterial>();
-  private hull: THREE.MeshBasicMaterial | null = null;
-  private solidInk: THREE.MeshBasicMaterial | null = null;
   private leafTex: THREE.CanvasTexture | null = null;
   private shaftTex: THREE.CanvasTexture | null = null;
 
@@ -363,16 +362,11 @@ export class WorldKit {
     return g;
   }
 
-  /** Inverted-hull ink outline shared by every low-poly figure. */
-  hullMaterial(): THREE.MeshBasicMaterial {
-    if (!this.hull) this.hull = this.track(new THREE.MeshBasicMaterial({ color: PALETTE.ink, side: THREE.BackSide }));
-    return this.hull;
-  }
-
-  /** Solid ink (eyes, small accents). */
-  inkSolid(): THREE.MeshBasicMaterial {
-    if (!this.solidInk) this.solidInk = this.track(new THREE.MeshBasicMaterial({ color: PALETTE.ink }));
-    return this.solidInk;
+  /** Wide base ground under the whole set so no camera angle sees through the floor. */
+  ground(parent: THREE.Object3D, color: string, y: number): THREE.Mesh {
+    const m = this.mesh(parent, new THREE.CircleGeometry(260, 48), this.toon(color), [0, y, 0], { rot: [-Math.PI / 2, 0, 0], ink: false, shadow: false });
+    m.receiveShadow = true;
+    return m;
   }
 
   /** Cached double-sided toon material (open shells: caps, kerudung, cups). */
@@ -810,6 +804,8 @@ export interface ExtraSpec {
   pose: ExtraPose;
   headgear: ExtraHeadgear;
   outfit: string;
+  /** Garment cut (default koko); jas for delegates in suits. */
+  wear?: Outfit;
   /** Trousers / sarung colour. */
   lower?: string;
   /** Kerudung colour. */
@@ -832,166 +828,67 @@ export function faceToward(from: Vec3, to: Vec3): number {
   return Math.atan2(to[0] - from[0], to[2] - from[2]);
 }
 
-/** Builds one figure; returns its per-frame idle / walk animator. */
-function buildExtra(kit: WorldKit, parent: THREE.Object3D, spec: ExtraSpec): (f: WorldFrame) => void {
-  const root = new THREE.Group();
-  root.position.set(...spec.pos);
-  root.rotation.y = spec.yaw;
-  root.scale.setScalar(spec.scale ?? 0.9);
-  parent.add(root);
-  const hull = kit.hullMaterial();
-  const skin = kit.toon(spec.skin ?? EXTRA_SKINS[spec.seed % EXTRA_SKINS.length] ?? '#d9a77c');
-  const cloth = kit.toon(spec.outfit);
-  const lower = kit.toon(spec.lower ?? '#2d2a3a');
+const darken = (hex: string, k: number): string => `#${new THREE.Color(hex).multiplyScalar(k).getHexString()}`;
 
-  const part = (p: THREE.Object3D, key: string, make: () => THREE.BufferGeometry, mat: THREE.Material, pos: Vec3, outline = false, rot?: Vec3): THREE.Mesh => {
-    const m = new THREE.Mesh(kit.geo(key, make), mat);
-    m.position.set(...pos);
-    if (rot) m.rotation.set(...rot);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    if (outline) {
-      const h = new THREE.Mesh(m.geometry, hull);
-      h.scale.setScalar(1.07);
-      m.add(h);
+/** Figuran wear the same Canvas2D bean-head rig as the leads, with seeded variation. */
+function extraLook(spec: ExtraSpec): CharacterLook {
+  const skin = spec.skin ?? EXTRA_SKINS[spec.seed % EXTRA_SKINS.length] ?? '#d9a77c';
+  const veiled = spec.headgear === 'kerudung';
+  const headwear: Headwear = (() => {
+    switch (spec.headgear) {
+      case 'peci':
+        return { kind: 'peci', tilt: (hash01(spec.seed, 3) - 0.5) * 0.08 };
+      case 'kopiah':
+        return { kind: 'peci', tilt: 0, color: '#f2eee6' };
+      case 'caping':
+        return { kind: 'caping' };
+      case 'turban':
+        return { kind: 'turban' };
+      case 'kerudung':
+        return { kind: 'kerudung', color: spec.accent ?? '#e9d9c2' };
+      case 'bare':
+        return { kind: 'bare' };
     }
-    p.add(m);
-    return m;
-  };
-
-  const pose = spec.pose;
-  const hipBase = pose === 'bersila' ? 0.14 : 0.47;
-  const hips = new THREE.Group();
-  hips.position.y = hipBase;
-  root.add(hips);
-  const torso = new THREE.Group();
-  hips.add(torso);
-  const chest = part(torso, 'x-torso', () => new THREE.CapsuleGeometry(0.2, 0.3, 6, 14), cloth, [0, 0.35, 0], true);
-  chest.scale.set(1, 1, 0.8);
-  const neck = new THREE.Group();
-  neck.position.y = 0.7;
-  torso.add(neck);
-  part(
-    neck,
-    'x-head',
-    () => {
-      const g = new THREE.SphereGeometry(0.2, 18, 14);
-      g.scale(1, 1.12, 0.96);
-      return g;
-    },
+  })();
+  return {
+    name: `figuran-${spec.seed}`,
     skin,
-    [0, 0.2, 0.01],
-    true,
-  );
-  for (const sx of [-1, 1]) part(neck, 'x-eye', () => new THREE.SphereGeometry(0.022, 8, 6), kit.inkSolid(), [sx * 0.07, 0.23, 0.195]);
-
-  switch (spec.headgear) {
-    case 'peci':
-    case 'kopiah': {
-      const hat = part(neck, 'x-peci', () => new THREE.CylinderGeometry(0.17, 0.182, 0.13, 20), kit.toon(spec.headgear === 'peci' ? '#17121c' : '#f2eee6'), [0, 0.37, 0], true);
-      hat.scale.z = 0.9;
-      break;
-    }
-    case 'caping':
-      part(neck, 'x-caping', () => new THREE.ConeGeometry(0.44, 0.22, 20), kit.toon('#caa25a'), [0, 0.47, 0], true);
-      break;
-    case 'turban':
-      part(neck, 'x-turban-dome', () => new THREE.SphereGeometry(0.21, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), kit.toon('#f1ede4'), [0, 0.27, 0], true);
-      part(neck, 'x-turban-band', () => new THREE.TorusGeometry(0.19, 0.055, 8, 20), kit.toon('#e2dccf'), [0, 0.29, 0], false, [Math.PI / 2, 0, 0]);
-      break;
-    case 'kerudung':
-      part(neck, 'x-kerudung', () => new THREE.SphereGeometry(0.235, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), kit.toonDouble(spec.accent ?? '#e9d9c2'), [0, 0.2, -0.01], true);
-      part(torso, 'x-kerudung-cape', () => new THREE.ConeGeometry(0.3, 0.32, 18, 1, true), kit.toonDouble(spec.accent ?? '#e9d9c2'), [0, 0.6, 0]);
-      break;
-    case 'bare':
-      part(neck, 'x-hair', () => new THREE.SphereGeometry(0.208, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.42), kit.toon('#1d1616'), [0, 0.205, -0.005]);
-      break;
-  }
-
-  const shoulder = (sx: number): THREE.Group => {
-    const g = new THREE.Group();
-    g.position.set(sx * 0.235, 0.58, 0);
-    torso.add(g);
-    part(
-      g,
-      'x-arm',
-      () => {
-        const a = new THREE.CapsuleGeometry(0.06, 0.3, 4, 8);
-        a.translate(0, -0.2, 0);
-        return a;
-      },
-      cloth,
-      [0, 0, 0],
-    );
-    part(g, 'x-hand', () => new THREE.SphereGeometry(0.058, 10, 8), skin, [0, -0.4, 0]);
-    return g;
+    skinShade: darken(skin, 0.8),
+    headwear,
+    outfit: spec.wear ?? 'koko',
+    cloth: spec.outfit,
+    clothShade: darken(spec.outfit, 0.82),
+    beard: !veiled && hash01(spec.seed, 4) > 0.72 ? 'neat' : 'none',
+    beardColor: '#2a201c',
+    mustache: !veiled && hash01(spec.seed, 5) > 0.55,
+    glasses: false,
+    shoulderScarf: null,
+    browColor: '#231918',
+    lower: spec.lower ?? '#3a3448',
+    lowerKind: veiled || (spec.wear ?? 'koko') === 'koko' ? 'sarung' : 'trousers',
   };
-  const armL = shoulder(-1);
-  const armR = shoulder(1);
+}
 
-  const legs: THREE.Group[] = [];
-  if (pose === 'bersila') {
-    for (const s of [-1, 1]) part(hips, 'x-lap', () => new THREE.CapsuleGeometry(0.085, 0.42, 4, 8), lower, [0, -0.03, 0.13], false, [0, s * 0.3, Math.PI / 2]);
-  } else {
-    for (const sx of [-1, 1]) {
-      const leg = new THREE.Group();
-      leg.position.set(sx * 0.09, 0, 0);
-      hips.add(leg);
-      part(
-        leg,
-        'x-leg',
-        () => {
-          const l = new THREE.CapsuleGeometry(0.075, 0.3, 4, 8);
-          l.translate(0, -0.22, 0);
-          return l;
-        },
-        lower,
-        [0, 0, 0],
-      );
-      if (pose === 'bench') {
-        leg.rotation.x = -Math.PI / 2;
-        part(hips, 'x-shin', () => new THREE.CapsuleGeometry(0.07, 0.24, 4, 8), lower, [sx * 0.09, -0.2, 0.42]);
-      }
-      legs.push(leg);
-    }
-  }
-
-  const prop = spec.prop ?? 'none';
-  const baskets: THREE.Group[] = [];
-  if (prop === 'pikulan') {
-    part(torso, 'x-pole', () => new THREE.CylinderGeometry(0.018, 0.018, 1.5, 6), kit.toon('#8a6a3a'), [0.2, 0.76, 0], false, [Math.PI / 2, 0, 0]);
-    for (const z of [-0.68, 0.68]) {
-      const b = new THREE.Group();
-      b.position.set(0.2, 0.76, z);
-      torso.add(b);
-      part(b, 'x-rope', () => new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), kit.toon('#c9b48a'), [0, -0.2, 0]);
-      part(b, 'x-basket', () => new THREE.CylinderGeometry(0.17, 0.13, 0.18, 12, 1, true), kit.toonDouble('#9a7040'), [0, -0.48, 0], true);
-      for (let k = 0; k < 3; k++) part(b, 'x-fruit', () => new THREE.SphereGeometry(0.06, 8, 6), kit.toon(k % 2 ? '#d9822b' : '#6f9a3a'), [(k - 1) * 0.07, -0.4, (k % 2) * 0.04]);
-      baskets.push(b);
-    }
-    armR.rotation.set(-2.75, 0, 0.12);
-  } else if (prop === 'papers') {
-    const stack = part(torso, 'x-papers', () => new THREE.BoxGeometry(0.36, 0.16, 0.27), kit.toon('#efe6cf'), [0, 0.36, 0.3]);
-    kit.ink(stack, 20);
-    armL.rotation.set(-1.15, 0, 0.3);
-    armR.rotation.set(-1.15, 0, -0.3);
-  } else if (prop === 'kitab') {
-    part(hips, 'x-kitab', () => new THREE.BoxGeometry(0.22, 0.035, 0.16), kit.toon('#6b2a1e'), [0, 0.03, 0.27]);
-    armL.rotation.set(-0.7, 0, 0.15);
-    armR.rotation.set(-0.7, 0, -0.15);
-  } else if (pose === 'bersila' || pose === 'bench') {
-    // Hands resting on the knees.
-    armL.rotation.set(-0.45, 0, 0.12);
-    armR.rotation.set(-0.45, 0, -0.12);
-  }
-  const armRestL = armL.rotation.x;
-  const armRestR = armR.rotation.x;
-  const swingArms = prop === 'none';
+/** Builds one figuran billboard; returns its per-frame idle / walk animator. */
+function buildExtra(kit: WorldKit, parent: THREE.Object3D, spec: ExtraSpec): (f: WorldFrame) => void {
+  const stance: Stance = spec.pose === 'bench' ? 'bench' : spec.pose === 'bersila' ? 'bersila' : 'stand';
+  const actor = kit.track(createToonActor(extraLook(spec), { gradientMap: kit.gradient, seed: spec.seed * 7 + 3, stance, textureScale: 0.42 }));
+  actor.mesh.position.set(...spec.pos);
+  actor.mesh.scale.setScalar(spec.scale ?? 0.85);
+  parent.add(actor.mesh);
+  const carry: Carry = spec.prop === 'pikulan' || spec.prop === 'papers' || spec.prop === 'kitab' ? spec.prop : 'none';
+  const arms: ArmDrive = { rest: stance === 'stand' ? 'side' : 'lap', carry, write: 0, explain: 0, gestureHand: 'point' };
   const att = spec.attentive ?? 0;
   const ph = spec.seed * 1.37;
+  const mood: Expression = att > 0.5 ? 'respect' : 'neutral';
+  const silent = visemeAt([], 0, false);
+  const facingDir = new THREE.Vector3();
+  const toCam = new THREE.Vector3();
+  const camRight = new THREE.Vector3();
+  const pos = actor.mesh.position;
 
-  return ({ frame, localFrame }) => {
-    const t = frame / 30;
+  return ({ frame, localFrame, camera }) => {
+    let yaw = spec.yaw;
     let walk = 0;
     let cycle = 0;
     if (spec.speed !== undefined) {
@@ -999,44 +896,43 @@ function buildExtra(kit: WorldKit, parent: THREE.Object3D, spec: ExtraSpec): (f:
         const [a, b] = spec.range;
         const half = (b - a) / 2;
         const phase = (localFrame * spec.speed) / Math.max(half, 0.01) + ph;
-        root.position.x = (a + b) / 2 - Math.cos(phase) * half;
+        pos.x = (a + b) / 2 - Math.cos(phase) * half;
         const v = Math.sin(phase);
-        // Turning around passes through facing the camera, which reads naturally.
-        root.rotation.y = (Math.PI / 2) * Math.max(-1, Math.min(1, v * 4));
+        yaw = (Math.PI / 2) * Math.max(-1, Math.min(1, v * 4));
         walk = Math.min(1, Math.abs(v) * 1.6);
-        cycle = (phase * half) / 0.28;
+        cycle = (phase * half) / 0.22;
       } else {
         const d = spec.speed * localFrame;
-        root.position.x = spec.pos[0] + Math.sin(spec.yaw) * d;
-        root.position.z = spec.pos[2] + Math.cos(spec.yaw) * d;
+        pos.x = spec.pos[0] + Math.sin(spec.yaw) * d;
+        pos.z = spec.pos[2] + Math.cos(spec.yaw) * d;
         walk = 1;
-        cycle = Math.abs(d) / 0.28 + ph;
+        cycle = Math.abs(d) / 0.22 + ph;
       }
     }
-    const s = Math.sin(cycle);
-    for (const [i, leg] of legs.entries()) if (pose === 'stand' || pose === 'walk') leg.rotation.x = (i === 0 ? s : -s) * 0.6 * walk;
-    if (swingArms) {
-      armL.rotation.x = armRestL - s * 0.45 * walk;
-      armR.rotation.x = armRestR + s * 0.45 * walk;
-    }
-    const idle = 1 - walk;
-    const seatedK = pose === 'bench' || pose === 'bersila' ? 0.4 : 1;
-    const weight = Math.sin(2 * Math.PI * 0.09 * t + ph);
-    hips.position.set(weight * 0.015 * idle * seatedK, hipBase + Math.abs(Math.cos(cycle)) * 0.04 * walk, 0);
-    torso.rotation.set(0.08 * walk + att * 0.06, 0, weight * 0.03 * idle * seatedK);
-    // Normal-rate breathing for extras (~0.24 Hz).
-    const br = Math.sin(2 * Math.PI * 0.24 * t + ph);
-    chest.scale.set(1 + br * 0.012, 1 + br * 0.02, 0.8 + br * 0.01);
-    neck.position.y = 0.7 + br * 0.006;
-    neck.rotation.set(
-      att * 0.14 + nodPulseAt(frame, spec.seed) * 0.22 * att + s * 0.04 * walk,
-      Math.sin(t * 0.31 + ph) * 0.32 * (1 - 0.7 * att) + Math.sin(t * 0.83 + ph * 2) * 0.05,
-      Math.sin(t * 0.5 + ph) * 0.04,
+    facingDir.set(Math.sin(yaw), 0, Math.cos(yaw));
+    toCam.subVectors(camera.position, pos).setY(0).normalize();
+    camRight.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+    // Seen from behind when the figure faces away from the camera.
+    const back = facingDir.dot(toCam) < -0.2;
+    const glance = Math.sin((frame / 30) * 0.31 + ph) * 0.18 * (1 - att);
+    const turn = THREE.MathUtils.clamp(facingDir.dot(camRight) * 1.1, -0.85, 0.85) + glance;
+    actor.update(
+      {
+        frame,
+        expression: { from: mood, to: mood, mix: 0 },
+        viseme: silent,
+        turn: back ? turn * 0.3 : turn,
+        nod: 0,
+        gesture: 0,
+        lean: att * 0.15,
+        listening: att,
+        arms,
+        facing: back ? 'back' : 'front',
+        walk,
+        walkPhase: cycle,
+      },
+      camera.position,
     );
-    baskets.forEach((b, i) => {
-      b.rotation.x = Math.sin(cycle + i * Math.PI) * 0.14 * walk + Math.sin(t * 1.3 + i) * 0.03;
-      b.position.y = 0.76 - Math.abs(Math.cos(cycle)) * 0.03 * walk;
-    });
   };
 }
 
@@ -1163,6 +1059,7 @@ function foregroundCanopy(kit: WorldKit, parent: THREE.Object3D, seed: number): 
 
 function buildBandung1923(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#1d2a24', -0.03);
   const rand = mulberry32(1923);
   const cobble = kit.canvas(512, 512, (c, w, h) => cobbles(c, w, h, 11), { repeat: [6, 14] });
   const street = kit.track(new THREE.MeshStandardMaterial({ map: cobble, roughness: 0.28, metalness: 0.05 }));
@@ -1273,6 +1170,7 @@ function buildBandung1923(kit: WorldKit): WorldScene {
 
 function buildLanggar(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#3a2416', -0.03);
   const floorTex = kit.canvas(512, 512, (c, w, h) => planks(c, w, h, '#6e3f22', 8, false, 8), { repeat: [3, 3] });
   kit.mesh(g, new THREE.PlaneGeometry(10, 8.6), kit.toon('#ffffff', { map: floorTex }), [0, 0, -0.3], { rot: [-Math.PI / 2, 0, 0], ink: false });
   const gedek = kit.canvas(512, 512, (c, w, h) => {
@@ -1396,6 +1294,7 @@ function buildLanggar(kit: WorldKit): WorldScene {
   kit.cyl(g, 0.05, 0.06, 0.08, [1.15, 0.5, -0.75], PALETTE.brass, { seg: 12 });
   const pelitaGlow = kit.glow(g, '#ffcf7a', 0.35, [1.15, 0.6, -0.75], 0.9);
   const cups = [teaCup(kit, g, [0.22, 0.46, -0.16], 1), teaCup(kit, g, [-0.58, 0.46, -0.22], 2)];
+  for (const sx of [-1, 1]) kit.box(g, [0.74, 0.12, 0.62], [sx * 0.72, 0.06, -1.5], '#7a2c3a', { ink: 20 });
 
   // Santri sitting cross-legged in a halaqah, listening attentively.
   const teachers: Vec3 = [0, 0, -1.5];
@@ -1418,7 +1317,7 @@ function buildLanggar(kit: WorldKit): WorldScene {
       lower,
       prop,
       // Front pair sit low so they only peek in as over-the-shoulder silhouettes.
-      scale: i < 2 ? 0.64 : 0.78,
+      scale: i < 2 ? 0.74 : 0.8,
       attentive: 1,
       seed: 20 + i,
     })),
@@ -1440,7 +1339,7 @@ function buildLanggar(kit: WorldKit): WorldScene {
   return {
     id: 'langgar',
     group: g,
-    anchors: { seatLeft: new THREE.Vector3(-0.72, -0.02, -1.5), seatRight: new THREE.Vector3(0.72, -0.02, -1.5) },
+    anchors: { seatLeft: new THREE.Vector3(-0.72, 0.12, -1.5), seatRight: new THREE.Vector3(0.72, 0.12, -1.5) },
     background: new THREE.Color('#120d22'),
     fog: new THREE.Fog('#160f26', 7, 22),
     update: (f) => {
@@ -1470,6 +1369,7 @@ function buildLanggar(kit: WorldKit): WorldScene {
 
 function buildHassanStudy(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#3a2416', -0.03);
   const floorTex = kit.canvas(512, 512, (c, w, h) => planks(c, w, h, '#5a3420', 41, false, 8), { repeat: [5, 3] });
   kit.mesh(g, new THREE.PlaneGeometry(22, 12), kit.toon('#ffffff', { map: floorTex }), [0, 0, 1], { rot: [-Math.PI / 2, 0, 0], ink: false });
   const panelTex = kit.canvas(512, 512, (c, w, h) => planks(c, w, h, '#6a4028', 42, true, 6), { repeat: [6, 1] });
@@ -1482,6 +1382,8 @@ function buildHassanStudy(kit: WorldKit): WorldScene {
   g.add(desk);
   kit.box(desk, [1.6, 0.06, 0.8], [0, 0.75, 0], PALETTE.teak);
   for (const x of [-0.72, 0.72]) kit.box(desk, [0.12, 0.72, 0.7], [x, 0.36, 0], PALETTE.teakDark);
+  kit.box(desk, [1.32, 0.62, 0.03], [0, 0.41, 0.37], PALETTE.teakDark);
+  kit.box(desk, [0.46, 0.22, 0.42], [0, 0.11, -0.62], '#3a2418', { ink: 20 });
   const paperRand = mulberry32(51);
   for (let i = 0; i < 9; i++) kit.box(desk, [0.42, 0.012, 0.3], [-0.1 + (paperRand() - 0.5) * 0.04, 0.786 + i * 0.012, 0.12], '#f1e6cc', { rot: [0, (paperRand() - 0.5) * 0.2, 0], ink: i === 8 ? 10 : false });
   const writing = kit.canvas(256, 192, (c, w, h) => {
@@ -1595,7 +1497,7 @@ function buildHassanStudy(kit: WorldKit): WorldScene {
   return {
     id: 'hassanStudy',
     group: g,
-    anchors: { desk: new THREE.Vector3(-4, 0.22, -2.0), podium: new THREE.Vector3(4, 0.98, -1.3) },
+    anchors: { desk: new THREE.Vector3(-4, 0.22, -2.0), podium: new THREE.Vector3(4, 0.5, -1.3) },
     background: new THREE.Color('#120d22'),
     fog: new THREE.Fog('#170f28', 9, 26),
     update: (f) => {
@@ -1646,6 +1548,7 @@ function gearGeometry(teeth: number, radius: number, depth: number): THREE.Buffe
 
 function buildPressRoom(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#221f30', -0.03);
   kit.mesh(g, new THREE.PlaneGeometry(14, 10), '#2a2638', [0, 0, 0], { rot: [-Math.PI / 2, 0, 0], ink: false });
   const brickTex = kit.canvas(512, 512, (c, w, h) => bricks(c, w, h, 81), { repeat: [5, 2] });
   kit.box(g, [14, 5, 0.2], [0, 2.5, -3.6], kit.toon('#ffffff', { map: brickTex }), { ink: false });
@@ -1864,6 +1767,7 @@ function rock(kit: WorldKit, parent: THREE.Object3D, pos: Vec3, scale: Vec3, see
 
 function buildEndeCoast(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#0c1636', -0.9);
   const seaGeo = new THREE.PlaneGeometry(170, 120, 150, 110);
   seaGeo.rotateX(-Math.PI / 2);
   const seaBase = Float32Array.from(seaGeo.attributes.position!.array as ArrayLike<number>);
@@ -1975,6 +1879,11 @@ function buildEndeCoast(kit: WorldKit): WorldScene {
   const leafRest = leaves.map((l) => l.rotation.clone());
 
   // Storm lantern hanging from the tree: the warm key on Soekarno, swaying in the sea breeze.
+  // Small writing table + stool: Bung Karno writes his letter to A. Hassan here.
+  kit.box(g, [0.72, 0.04, 0.42], [-0.38, 4.25 + 0.56, -0.17], PALETTE.teak, { rot: [0, 0.54, 0] });
+  for (const [lx, lz] of [[-0.66, -0.12], [-0.25, -0.42], [-0.5, 0.08], [-0.09, -0.22]] as const) kit.box(g, [0.04, 0.56, 0.04], [lx, 4.25 + 0.28, lz], PALETTE.teakDark, { ink: false });
+  kit.box(g, [0.36, 0.03, 0.26], [-0.36, 4.25 + 0.595, -0.15], '#f1e6cc', { rot: [0, 0.4, 0], ink: 10 });
+  kit.box(g, [0.4, 0.42, 0.36], [-0.8, 4.25 + 0.21, -0.9], PALETTE.teakDark, { rot: [0, 0.54, 0], ink: 20 });
   const lantern = hangingLantern(kit, tree, [1.0, 3.2, 0.35], 0.58, { intensity: 6, distance: 8, glow: 1.1, seed: 17, amplitude: 0.1 });
   const lanternMotes = kit.motes(g, { from: [-0.8, 6.8, 0.75], radius: 1.6, count: 140, color: '#ffd9a0', size: 0.025, seed: 150 });
   kit.spot(g, '#ffb766', 10, [-0.5, 7.2, 1.4], [-0.6, 4.4, -0.6], 0.7);
@@ -2042,7 +1951,7 @@ function buildEndeCoast(kit: WorldKit): WorldScene {
   return {
     id: 'endeCoast',
     group: g,
-    anchors: { underTree: new THREE.Vector3(-0.6, 4.22, -0.55) },
+    anchors: { underTree: new THREE.Vector3(-0.6, 4.25, -0.55) },
     background: new THREE.Color('#0c0c26'),
     fog: new THREE.Fog('#141a46', 30, 140),
     update: ({ frame, progress }) => {
@@ -2096,6 +2005,7 @@ function buildEndeCoast(kit: WorldKit): WorldScene {
 
 function buildPesantren(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#2f3a2c', -0.03);
   kit.mesh(g, new THREE.PlaneGeometry(60, 40), '#2f3a2c', [0, 0, -5], { rot: [-Math.PI / 2, 0, 0], ink: false });
   const brickTex = kit.canvas(512, 512, (c, w, h) => bricks(c, w, h, 61), { repeat: [7, 3] });
   const brick = kit.toon('#ffffff', { map: brickTex });
@@ -2229,6 +2139,7 @@ function buildPesantren(kit: WorldKit): WorldScene {
 
 function buildParliament(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#2a2638', -0.03);
   const marble = kit.canvas(512, 512, (c, w) => {
     const s = w / 8;
     for (let y = 0; y < 8; y++)
@@ -2261,10 +2172,10 @@ function buildParliament(kit: WorldKit): WorldScene {
     }
   // Dais, lectern and microphone.
   kit.box(g, [4.4, 0.6, 2.4], [0, 0.3, -3.4], PALETTE.teakDark);
-  kit.box(g, [1.0, 1.15, 0.55], [0, 1.18, -2.95], PALETTE.teak);
-  kit.box(g, [1.15, 0.06, 0.7], [0, 1.78, -2.98], PALETTE.teakDark, { rot: [0.15, 0, 0] });
-  kit.cyl(g, 0.012, 0.012, 0.35, [0.25, 1.95, -2.85], '#1a1a22', { seg: 6, ink: false });
-  kit.mesh(g, new THREE.CapsuleGeometry(0.04, 0.08, 4, 8), '#c9ccd8', [0.25, 2.14, -2.85], { ink: false });
+  kit.box(g, [1.0, 0.87, 0.55], [0, 1.035, -2.95], PALETTE.teak);
+  kit.box(g, [1.15, 0.06, 0.7], [0, 1.5, -2.98], PALETTE.teakDark, { rot: [0.15, 0, 0] });
+  kit.cyl(g, 0.012, 0.012, 0.35, [0.46, 1.62, -2.85], '#1a1a22', { seg: 6, ink: false });
+  kit.mesh(g, new THREE.CapsuleGeometry(0.04, 0.08, 4, 8), '#c9ccd8', [0.46, 1.81, -2.85], { ink: false });
   for (const s of [-1, 1] as const) {
     kit.cyl(g, 0.03, 0.03, 3.6, [s * 2.6, 1.8, -4.2], PALETTE.brass, { seg: 8 });
     const flag = kit.mesh(g, new THREE.PlaneGeometry(1.2, 0.8, 12, 1), kit.track(new THREE.MeshToonMaterial({ gradientMap: kit.gradient, side: THREE.DoubleSide, map: kit.canvas(64, 64, (c, w, h) => {
@@ -2284,7 +2195,9 @@ function buildParliament(kit: WorldKit): WorldScene {
       const z = -3 + Math.cos(a) * r;
       if (Math.abs(x) < 1.0 && r < 6) continue;
       kit.box(g, [0.9, 0.75, 0.45], [x, 0.375, z - 0.35 * Math.cos(a)], PALETTE.teakDark, { rot: [0, a, 0], ink: 20 });
-      seats.push([x + Math.sin(a) * 0.3, 0, z + Math.cos(a) * 0.3]);
+      const seat: Vec3 = [x + Math.sin(a) * 0.3, 0, z + Math.cos(a) * 0.3];
+      kit.box(g, [0.46, 0.42, 0.42], [seat[0], 0.21, seat[2]], '#3a2418', { rot: [0, a, 0], ink: 20 });
+      seats.push(seat);
     }
   }
   const suits = ['#2f3446', '#3b3a2e', '#4a3a30', '#e9e2d0', '#363c52', '#d9cdb0'] as const;
@@ -2343,7 +2256,7 @@ function buildParliament(kit: WorldKit): WorldScene {
   return {
     id: 'parliament1950',
     group: g,
-    anchors: { podium: new THREE.Vector3(0, 1.22, -3.45) },
+    anchors: { podium: new THREE.Vector3(0, 0.6, -3.45) },
     background: new THREE.Color('#141026'),
     fog: new THREE.Fog('#1a1430', 14, 40),
     update: (wf) => {
@@ -2381,6 +2294,7 @@ function buildParliament(kit: WorldKit): WorldScene {
 
 function buildGedungSate(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
+  kit.ground(g, '#1b1a30', -0.03);
   kit.mesh(g, new THREE.PlaneGeometry(80, 60), '#1b1a30', [0, 0, -5], { rot: [-Math.PI / 2, 0, 0], ink: false });
   for (const s of [-1, 1] as const) kit.mesh(g, new THREE.PlaneGeometry(9, 12), '#1f3326', [s * 7, 0.01, -2], { rot: [-Math.PI / 2, 0, 0], ink: false });
   kit.mesh(g, new THREE.PlaneGeometry(4, 20), '#3a3550', [0, 0.012, 0], { rot: [-Math.PI / 2, 0, 0], ink: false });

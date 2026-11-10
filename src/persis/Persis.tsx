@@ -99,7 +99,7 @@ class StageManager {
     const cast = shot.cast.map((member, i): CastSlot => {
       const anchor = world.anchors[member.anchor];
       if (!anchor) throw new Error(`World "${shot.world}" has no anchor "${member.anchor}"`);
-      const actor = createToonActor(member.actor, { gradientMap: this.kit.gradient, seed: index * 13 + i * 5 + 1 });
+      const actor = createToonActor(member.actor, { gradientMap: this.kit.gradient, seed: index * 13 + i * 5 + 1, stance: member.stance ?? 'bust' });
       actor.mesh.position.copy(anchor);
       actor.mesh.scale.setScalar(member.scale);
       world.group.add(actor.mesh);
@@ -186,6 +186,13 @@ const PersisScene: React.FC<{ words: readonly WordTiming[] }> = ({ words }) => {
           gesture,
           lean: Math.max(talkEnvelope * 0.65, gesture),
           listening: 1 - talkEnvelope,
+          arms: {
+            rest: member.hands ?? 'side',
+            carry: member.carry ?? 'none',
+            write: windowEnvelope(member.writing ?? [], progress, 0.04),
+            explain: windowEnvelope(member.explain ?? [], progress, 0.03),
+            gestureHand: member.gestureHand ?? 'point',
+          },
         },
         camera.position,
       );
