@@ -18,6 +18,9 @@ Implementasi referensi di repo ini:
 | `src/cikajang/Cikajang.tsx` | StageManager, contact shadow, frozen sun, caption tajam anti-pudar, hook title slam, font guard aman. |
 | `src/persis/worlds.ts` | `WorldKit` (ramp toon, ink, glow, dust, motes, shaft, label auto-fit, backdrop). |
 | `tools/align_subtitles.py` | Penyelaras `words.json` berbasis akustik (`Whisper` / `FFmpeg silencedetect` + RMS speech-island DP + suku kata angka Indonesia). |
+| `src/cikajang/fonts.ts` | `ERA_FONT` (stack font per era + fallback senada), `DIEGETIC_FONT_CSS`, `FONT_GUARD_MS = 1200`. |
+| `src/cikajang/signage.ts` | Painter papan per era: `platePaint`, `carvedStonePaint`, `stencilPaint`, `inkStampPaint`, `muralLetteringPaint`, `platePlane` (emissive) + `fitFont` (auto-fit 86 %). |
+| `src/cikajang/flora.ts` | Prefab hero flora ter-instance: kol komposit, daun bawang, wortel, guludan, tiang telegraf + kabel, burung, daun foreground. |
 
 Kalau ragu, **tiru kode acuan**. Dilarang keras membuat: manekin realistis, kaki tongkat, lengan pipa bersendi patah, T-pose kaku, jalan melompat seperti wayang, bahu menonjol di depan dada, atau teks papan/tahun yang terpotong bingkai kamera.
 
@@ -180,6 +183,17 @@ Semua pemuatan Google Fonts di luar `Plus Jakarta Sans` tetap wajib melalui **Fo
 2. **`Whisper` / `tools/align_subtitles.py`**: Penyelarasan presisi `words.json` & `sentences.json` sebelum animasi dimulai; seluruh aksi visual (*key beats*) mendarat **0–3 frame sebelum** kata terkait terucap.
 3. **Audio Mastering (`sfx/` + `FFmpeg`)**: Vokal sebagai acuan (0 dB), music bed di **−6 dB gated RMS (50 % vokal)**, SFX melewati peak limiter (−1 dBTP), output master dinormalisasi ke **−14 LUFS integrated (EBU R128)** sebelum muxing akhir.
 4. **Render Hemat RAM & `HyperFrames`**: Pada mesin RAM 4GB (Dual-Core), render lokal Remotion WAJIB memakai `--concurrency=1 --gl=angle`, atau integrasi frame-capture deterministik (`HyperFrames`) untuk proyek ber-VRAM ketat; **dilarang render visual di cloud.**
+
+---
+
+## 9.3 Konvensi Implementasi v2.1 (hasil revisi 7 poin Cikajang)
+
+- **Subtitle:** jalankan `python3 tools/align_subtitles.py public/<p>/voice.wav public/<p>/sentences.json --out public/<p>/words.json` setiap kali voice/naskah berubah. Tanpa Whisper, backend RMS stdlib (ambang adaptif, jeda ≥ 160 ms) dipakai; cek print per-frasa (`Tahun 1935,` 56.01–57.89 → `ada` 58.14). Token kata = `text.split()` sehingga harus identik dengan kata di kalimat. Jam `06.04` dibobot sebagai "enam lewat empat". Caption: `enter`/`exit` 2 frame, scrim `rgba(10,8,20,0.82)`.
+- **Font guard memblokir panggung:** tekstur papan dilukis saat world dibangun, jadi `<ThreeCanvas>` baru di-mount setelah `useFontGuard()` siap (font termuat atau 1200 ms), dan `continueRender` dipanggil setelah mount. Jangan melukis canvas teks sebelum font siap — font fallback akan "terbakar" ke tekstur.
+- **Z-order lengan:** klasifikasi `front` disimpan di set `FRONT_POSES` di `toon.ts` (pose = string di `story.ts`). Urutan lukis: lengan belakang → torso → kepala → body prop → lengan depan → semua mitten → hand prop. Mitten selalu di atas badan (tangan di saku/pinggang tetap terlihat). Lengan belakang berpangkal 30 px ke dalam bahu; lengan depan tanpa outline 46 px dari soket + socket shade lembut. Saat blend, layer berganti di `mix = 0.5`.
+- **Walk tanpa skating:** fase jalan dihitung dari jarak tempuh: `walkPhase = travelled / scale * WALK_PHASE_PER_METRE` (`= PX / (2·STRIDE_AMP/π)`, ±21.5 rad/m). Jangan pakai faktor tebakan — kaki penumpu akan meluncur. Bob di canvas memakai `+cos(2φ)·3.5` (sumbu y canvas ke bawah → titik terendah saat double-support).
+- **Teks vs kamera bergerak:** audit frustum harus memakai `sampleCamera()` nyata (creep, kick, roll), bukan hanya keyframe. Papan yang keluar frame karena dolly/pan harus: (1) terbaca utuh ≥ 2 detik dulu (tahan kamera dengan keyframe hold), (2) keluar **sekali** di bagian cepat smootherstep, (3) tidak pernah "mengintip" terpotong lagi di gerakan berikutnya. Contoh: papan PJKA shot 8 (`i93 c29 o178`).
+- **Panel tambahan** (badge `5x`, tanggal) digantung sebagai panel terpisah di bawah/atas papan utama, tidak pernah ditempel di atas huruf atau di jalur tangan tokoh.
 
 ---
 
