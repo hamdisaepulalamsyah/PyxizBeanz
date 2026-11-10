@@ -216,15 +216,30 @@ function useCaptionFont(): void {
   const { delayRender, continueRender } = useDelayRender();
   const [handle] = useState(() => delayRender('Loading caption font'));
   useEffect(() => {
+    let resolved = false;
+    const done = (): void => {
+      if (!resolved) {
+        resolved = true;
+        continueRender(handle);
+      }
+    };
+    const timer = setTimeout(done, 1200);
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = FONT_CSS;
-    const done = (): void => continueRender(handle);
     link.onload = () => {
-      Promise.all([document.fonts.load(`800 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`), document.fonts.load('600 40px "Plus Jakarta Sans"')]).then(done, done);
+      if (document.fonts && document.fonts.load) {
+        Promise.all([
+          document.fonts.load(`800 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`),
+          document.fonts.load('600 40px "Plus Jakarta Sans"')
+        ]).then(done, done);
+      } else {
+        done();
+      }
     };
     link.onerror = done;
     document.head.appendChild(link);
+    return () => clearTimeout(timer);
   }, [handle, continueRender]);
 }
 
@@ -433,6 +448,7 @@ export const Persis: React.FC<PersisProps> = ({ words, sentences }) => {
       <ShotChip />
       <Captions pages={pages} words={words} />
       <Audio src={staticFile('voice.wav')} />
+      <Audio src={staticFile('sfx.wav')} />
     </AbsoluteFill>
   );
 };
