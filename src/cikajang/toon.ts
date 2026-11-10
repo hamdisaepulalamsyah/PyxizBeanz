@@ -15,10 +15,13 @@ import { clamp01, hash01, lerp, smoothstep } from './story';
  *    billboard origin, so planted figures stand exactly on the floor.
  */
 
-const LW = 512;
+/** Same canvas width as Persis (768): fully extended arms (shoulder 70 + reach 216 px) stay ≥ 98 px inside the edge. */
+const LW = 768;
 const LH = 1024;
 const TEXTURE_SCALE = 0.75;
 const CX = LW / 2;
+/** Hand centres are kept this far from the canvas edge so fingers/props (≈ 45 px) are never clipped. */
+const HAND_MARGIN = 60;
 /** Canvas y of the shoe soles. */
 const SOLE = LH - 8;
 
@@ -264,7 +267,8 @@ function handTarget(pose: ArmPose, side: 0 | 1, c: ArmCtx): Pt {
     case 'hip':
       return rel(30, 164);
     case 'strap':
-      return rel(-22, 52);
+      // Hand rests on the lower chest strap; elbow bends at a relaxed ~45–60°.
+      return rel(-18, 125);
     case 'pocket':
       return rel(-4, 200);
     case 'point':
@@ -335,9 +339,10 @@ interface ArmSolve {
   hand: Pt;
 }
 
-function solveArm(side: 0 | 1, target: Pt, sk: Skeleton): ArmSolve {
+function solveArm(side: 0 | 1, rawTarget: Pt, sk: Skeleton): ArmSolve {
   const s = SIGN[side];
   const shoulder: Pt = [CX + s * sk.shHalf, sk.shY + 14];
+  const target: Pt = [Math.min(LW - HAND_MARGIN, Math.max(HAND_MARGIN, rawTarget[0])), Math.max(HAND_MARGIN, rawTarget[1])];
   let dx = target[0] - shoulder[0];
   let dy = target[1] - shoulder[1];
   let d = Math.hypot(dx, dy);
