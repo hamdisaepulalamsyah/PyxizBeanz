@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PALETTE, type WorldFrame, WorldKit, mulberry32 } from '../persis/worlds';
-import type { Vec3, WorldId } from './story';
-import { clamp01, easeInCubic, easeOutCubic, keyed, lerp, smoothstep } from './story';
+import type { ColorPhase, Vec3, WorldId } from './story';
+import { COLOR_SCRIPT, clamp01, easeInCubic, easeOutCubic, keyed, lerp, smoothstep } from './story';
 import { ERA_FONT } from './fonts';
 import { birdFlock, cabbageGeometry, carrotTopGeometry, floraMaterial, foregroundLeaves, instancePrefab, leekGeometry, ridgeGeometry, telegraphLine, type Placement } from './flora';
 import { carvedStonePaint, fitFont, inkStampPaint, muralLetteringPaint, platePaint, platePlane, plateBacking, stencilPaint } from './signage';
@@ -130,13 +130,30 @@ function sky(opts: SkyOpts): Paint {
 
 /** Cikuray-like volcano silhouettes plus rolling hills. */
 const CIKURAY_RIDGES = (far: string, near: string): SkyOpts['ridges'] => [
-  { pts: [[0, 0.72], [0.18, 0.66], [0.34, 0.5], [0.42, 0.42], [0.5, 0.4], [0.58, 0.44], [0.7, 0.58], [0.86, 0.64], [1, 0.62]], color: far },
+  { pts: [[0, 0.66], [0.18, 0.58], [0.34, 0.4], [0.42, 0.29], [0.5, 0.25], [0.58, 0.3], [0.7, 0.5], [0.86, 0.6], [1, 0.58]], color: far },
   { pts: [[0, 0.8], [0.14, 0.74], [0.3, 0.78], [0.5, 0.72], [0.66, 0.77], [0.82, 0.71], [1, 0.76]], color: near },
 ];
 
-function lightRig(kit: WorldKit, g: THREE.Object3D, o: { sky: string; ground: string; hemi: number; key: string; keyIntensity: number; keyPos: Vec3; keyTarget: Vec3; extent: number }): THREE.DirectionalLight {
-  g.add(new THREE.HemisphereLight(o.sky, o.ground, o.hemi));
-  const key = new THREE.DirectionalLight(o.key, o.keyIntensity);
+/** Blend two hex colours (t = 0 → a, 1 → b). */
+function mixHex(a: string, b: string, t: number): string {
+  return `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
+}
+
+/**
+ * Colour-script lighting (skill v2.2 §5.4): hemi sky/ground, key tint and a shadow-less
+ * rim fill follow the phase palette, so shadows are indigo/lavender/amber — never neutral grey.
+ */
+function lightRig(kit: WorldKit, g: THREE.Object3D, o: { sky: string; ground: string; hemi: number; key: string; keyIntensity: number; keyPos: Vec3; keyTarget: Vec3; extent: number; phase?: ColorPhase }): THREE.DirectionalLight {
+  const cs = o.phase ? COLOR_SCRIPT[o.phase] : undefined;
+  g.add(new THREE.HemisphereLight(cs ? mixHex(o.sky, cs.haze, 0.25) : o.sky, cs ? mixHex(o.ground, cs.shadow, 0.6) : o.ground, o.hemi));
+  const key = new THREE.DirectionalLight(cs ? mixHex(o.key, cs.key, 0.45) : o.key, o.keyIntensity);
+  if (cs) {
+    // Opposite-side rim fill in the phase rim colour (no shadow map: free).
+    const fill = new THREE.DirectionalLight(mixHex(cs.rim, cs.shadow, 0.25), 0.25 + 0.55 * cs.rimStrength);
+    fill.position.set(-o.keyPos[0] * 0.8, Math.max(2.5, o.keyPos[1] * 0.5), -o.keyPos[2] * 0.8);
+    fill.target.position.set(...o.keyTarget);
+    g.add(fill, fill.target);
+  }
   key.position.set(...o.keyPos);
   key.target.position.set(...o.keyTarget);
   key.castShadow = true;
@@ -156,7 +173,12 @@ function lightRig(kit: WorldKit, g: THREE.Object3D, o: { sky: string; ground: st
 }
 
 function mountains(kit: WorldKit, g: THREE.Object3D, specs: readonly { x: number; z: number; r: number; h: number; color: string }[]): void {
-  for (const m of specs) kit.mesh(g, new THREE.ConeGeometry(m.r, m.h, 9, 1), kit.facet(m.color), [m.x, m.h / 2 - 0.5, m.z], { ink: false, shadow: false });
+  // Epic scale (skill v2.2 §6): ridges tower over the ~1.5 m cast; all sit ≥ 55 m behind the action.
+  for (const m of specs) {
+    const r = m.r * 1.25;
+    const h = m.h * 1.35;
+    kit.mesh(g, new THREE.ConeGeometry(r, h, 9, 1), kit.facet(m.color), [m.x, h / 2 - 0.5, m.z], { ink: false, shadow: false });
+  }
 }
 
 /** Railway along x (axis 'x') or z (axis 'z'). */
@@ -211,7 +233,16 @@ function facade(kit: WorldKit, g: THREE.Object3D, o: { x0: number; x1: number; f
   kit.box(g, [w, o.h, depth], [cx, o.h / 2, o.face - depth / 2], o.wall, { ink: 20 });
   kit.box(g, [w + 0.02, 0.5, 0.06], [cx, 0.25, o.face + 0.02], o.plinth ? o.plinth : kit.toon('#ffffff', { map: kit.canvas(512, 128, stonePaint('#6a6058', 9), { repeat: [w / 2, 1] }) }), { ink: false, shadow: false });
   kit.box(g, [w + 1.2, 0.18, depth + 2.6], [cx, o.h + 0.09, o.face - depth / 2 + 0.7], '#e8dcc0', { ink: 20 });
-  kit.hipRoof(g, w + 1.6, depth + 3, 2.2, [cx, o.h + 0.18, o.face - depth / 2 + 0.7], o.roof);
+  kit.hipRoof(g, w + 1.6, depth + 3, 3.4, [cx, o.h + 0.18, o.face - depth / 2 + 0.7], o.roof);
+  // Heavy corner pilasters + capitals at the far ends of the wall (never near signs/doors).
+  for (const x of [o.x0 + 0.35, o.x1 - 0.35]) {
+    kit.box(g, [0.7, o.h, 0.4], [x, o.h / 2, o.face + 0.12], '#d8ccb0', { ink: 20 });
+    kit.box(g, [0.9, 0.2, 0.55], [x, o.h - 0.1, o.face + 0.15], '#c8bca0', { ink: 20 });
+  }
+  // Ridge finial high on the roof: a brass spike on a ball.
+  const topY = o.h + 0.18 + 3.4;
+  kit.cyl(g, 0.02, 0.05, 0.9, [cx, topY + 0.35, o.face - depth / 2 + 0.7], brassMat(kit), { seg: 8, ink: false, shadow: false });
+  kit.mesh(g, new THREE.SphereGeometry(0.12, 10, 8), brassMat(kit), [cx, topY + 0.1, o.face - depth / 2 + 0.7], { ink: false, shadow: false });
 }
 
 function door(kit: WorldKit, g: THREE.Object3D, x: number, face: number, w: number, h: number, wood: string, y0 = 0): void {
@@ -584,6 +615,41 @@ function steamCup(kit: WorldKit, parent: THREE.Object3D, pos: Vec3, seed: number
   };
 }
 
+/** Polished brass: Phong with a bright specular band (cached per kit). */
+const BRASS = new WeakMap<WorldKit, THREE.MeshPhongMaterial>();
+function brassMat(kit: WorldKit): THREE.MeshPhongMaterial {
+  let m = BRASS.get(kit);
+  if (!m) {
+    m = kit.track(new THREE.MeshPhongMaterial({ color: '#c9992e', specular: '#fff2c4', shininess: 90, emissive: '#3a2508' }));
+    BRASS.set(kit, m);
+  }
+  return m;
+}
+
+/** Toothed gear in the XY plane (axis z), one extruded mesh. */
+function toothedGear(kit: WorldKit, parent: THREE.Object3D, r: number, teeth: number, thick: number, pos: Vec3, mat: THREE.Material): THREE.Mesh {
+  const shape = new THREE.Shape();
+  const inner = r * 0.84;
+  const da = (Math.PI * 2) / teeth;
+  for (let i = 0; i < teeth; i++) {
+    const a = i * da;
+    const pts: [number, number][] = [[a, inner], [a + da * 0.2, r], [a + da * 0.5, r], [a + da * 0.65, inner]];
+    pts.forEach(([ang, rad], k) => {
+      const x = Math.cos(ang) * rad;
+      const y = Math.sin(ang) * rad;
+      if (i === 0 && k === 0) shape.moveTo(x, y);
+      else shape.lineTo(x, y);
+    });
+  }
+  shape.closePath();
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, r * 0.22, 0, Math.PI * 2, true);
+  shape.holes.push(hole);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false, curveSegments: 6 });
+  geo.translate(0, 0, -thick / 2);
+  return kit.mesh(parent, geo, mat, pos, { ink: 30, shadow: false });
+}
+
 function lantern(kit: WorldKit, parent: THREE.Object3D, hook: Vec3, drop: number, seed: number, intensity = 3): (frame: number) => void {
   const pivot = new THREE.Group();
   pivot.position.set(...hook);
@@ -596,6 +662,9 @@ function lantern(kit: WorldKit, parent: THREE.Object3D, hook: Vec3, drop: number
   kit.cyl(body, 0.08, 0.09, 0.22, [0, 0, 0], kit.lit('#ffd28a', { transparent: true, opacity: 0.8 }), { seg: 12, ink: false, shadow: false });
   kit.cyl(body, 0.11, 0.12, 0.05, [0, -0.13, 0], '#2c2a2a', { seg: 12 });
   const flame = kit.glow(body, '#ffcf7a', 0.9, [0, 0, 0], 0.9);
+  // Bloom halo: wide, faint additive sprite (skill v2.2 §6 hero lantern).
+  const halo = kit.glow(body, '#ffb860', 2.6, [0, 0, 0.02], 0.2);
+  kit.cyl(body, 0.095, 0.095, 0.02, [0, 0.12, 0], brassMat(kit), { seg: 12, ink: false, shadow: false });
   const light = new THREE.PointLight('#ffae52', intensity, 7, 1.3);
   body.add(light);
   return (frame) => {
@@ -605,6 +674,7 @@ function lantern(kit: WorldKit, parent: THREE.Object3D, hook: Vec3, drop: number
     const flick = 1 + Math.sin(frame * 0.9 + seed) * 0.07 + Math.sin(frame * 2.3) * 0.04;
     light.intensity = intensity * flick;
     flame.material.opacity = Math.min(1, 0.82 + (flick - 1) * 1.5);
+    halo.material.opacity = 0.2 + (flick - 1) * 0.8;
   };
 }
 
@@ -638,8 +708,11 @@ function clock(kit: WorldKit, g: THREE.Object3D, pos: Vec3, radius: number, hh: 
       c.fillText(caption, w / 2, w * 0.66);
     }
   });
-  kit.cyl(grp, radius + 0.04, radius + 0.04, 0.08, [0, 0, -0.04], '#2a2a2e', { rot: [Math.PI / 2, 0, 0], seg: 32 });
-  kit.mesh(grp, new THREE.CircleGeometry(radius, 40), kit.toon('#ffffff', { map: face }), [0, 0, 0.002], { ink: false, shadow: false });
+  // Brass bezel (specular highlight band) + lit enamel face + soft halo behind.
+  kit.cyl(grp, radius + 0.05, radius + 0.05, 0.09, [0, 0, -0.04], brassMat(kit), { rot: [Math.PI / 2, 0, 0], seg: 32 });
+  kit.mesh(grp, new THREE.TorusGeometry(radius + 0.012, 0.016, 8, 40), brassMat(kit), [0, 0, 0.01], { ink: false, shadow: false });
+  kit.mesh(grp, new THREE.CircleGeometry(radius, 40), kit.toon('#ffffff', { map: face, emissive: '#fff2cc', emissiveMap: face, emissiveIntensity: 0.4 }), [0, 0, 0.002], { ink: false, shadow: false });
+  kit.glow(grp, '#ffd88a', radius * 2.7, [0, 0, 0.05], 0.12);
   const hand = (len: number, width: number, angle: number, z: number, color: string): THREE.Group => {
     const pivot = new THREE.Group();
     pivot.position.z = z;
@@ -684,6 +757,30 @@ function steamLoco(kit: WorldKit, parent: THREE.Object3D, body = '#17151f', trim
   kit.mesh(loco, new THREE.ConeGeometry(0.72, 0.6, 4), red, [2.7, 0.55, 0], { rot: [0, Math.PI / 4, -Math.PI / 2], ink: 20 });
   kit.box(loco, [0.22, 0.22, 0.22], [2.5, 2.15, 0], kit.lit('#fff0c0'), { ink: 10 });
   kit.glow(loco, '#ffe7a8', 1.8, [2.65, 2.15, 0], 0.7);
+  // Hero details: brass smokebox ring, steam dome, bell, cylinder blocks (all brass Phong with a specular band).
+  const brass = brassMat(kit);
+  kit.mesh(loco, new THREE.TorusGeometry(0.5, 0.03, 8, 28), brass, [2.56, 1.55, 0], { rot: [0, Math.PI / 2, 0], ink: false, shadow: false });
+  kit.mesh(loco, new THREE.SphereGeometry(0.21, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), brass, [0.4, 2.38, 0], { ink: false });
+  kit.mesh(loco, new THREE.ConeGeometry(0.1, 0.16, 10), brass, [1.2, 2.3, 0], { ink: false, shadow: false });
+  for (const s of [-1, 1] as const) {
+    kit.cyl(loco, 0.12, 0.12, 0.7, [1.75, 0.95, s * 0.66], '#24212e', { rot: [0, 0, Math.PI / 2], seg: 14 });
+    kit.cyl(loco, 0.13, 0.13, 0.05, [2.12, 0.95, s * 0.66], brass, { rot: [0, 0, Math.PI / 2], seg: 14, ink: false, shadow: false });
+  }
+  // Rack-and-pinion mechanism (mountain line): outboard toothed gears beside the drivers, and an
+  // inboard pinion that meshes with the rack strip laid between the rails.
+  const gears: { m: THREE.Mesh; dir: number }[] = [];
+  for (const s of [-1, 1] as const) {
+    gears.push({ m: toothedGear(kit, loco, 0.36, 16, 0.06, [0.5, 0.82, s * 0.86], brass), dir: 1 });
+    gears.push({ m: toothedGear(kit, loco, 0.2, 9, 0.06, [0.5, 1.34, s * 0.86], brass), dir: -16 / 9 });
+  }
+  gears.push({ m: toothedGear(kit, loco, 0.28, 12, 0.14, [-0.5, 0.5, 0], kit.toon('#5a4a2a')), dir: 1 });
+  gears[gears.length - 1]!.m.rotation.z = 0;
+  const rods: THREE.Mesh[] = [];
+  const pins: THREE.Mesh[] = [];
+  for (const s of [-1, 1] as const) {
+    rods.push(kit.box(loco, [2.1, 0.07, 0.04], [0, 0.76, s * 0.74], brass, { ink: false, shadow: false }));
+    for (const x of [1.0, 0, -1.0]) pins.push(kit.cyl(loco, 0.05, 0.05, 0.05, [x, 0.76, s * 0.72], brass, { rot: [Math.PI / 2, 0, 0], seg: 8, ink: false, shadow: false }));
+  }
   const wheels: { w: THREE.Group; r: number }[] = [];
   for (const [x, r] of [[1.0, 0.46], [0.0, 0.46], [-1.0, 0.46], [1.9, 0.27], [-2.8, 0.3], [-3.8, 0.3]] as const) {
     for (const z of [-0.64, 0.64]) {
@@ -692,6 +789,7 @@ function steamLoco(kit: WorldKit, parent: THREE.Object3D, body = '#17151f', trim
       loco.add(w);
       kit.cyl(w, r, r, 0.08, [0, 0, 0], red, { rot: [Math.PI / 2, 0, 0], seg: 24 });
       for (let k = 0; k < 4; k++) kit.box(w, [0.04, r * 1.9, 0.09], [0, 0, 0], '#5a1a1a', { rot: [0, 0, (k / 4) * Math.PI], ink: false });
+      kit.cyl(w, r * 0.22, r * 0.22, 0.12, [0, 0, 0], brass, { rot: [Math.PI / 2, 0, 0], seg: 10, ink: false, shadow: false });
       wheels.push({ w, r });
     }
   }
@@ -700,6 +798,15 @@ function steamLoco(kit: WorldKit, parent: THREE.Object3D, body = '#17151f', trim
     chimney: new THREE.Vector3(1.9, 2.85, 0),
     roll: (travelled) => {
       for (const { w, r } of wheels) w.rotation.z = -travelled / r;
+      const th = -travelled / 0.46;
+      // Crank pins ride on a 0.2 m throw; side rods stay parallel to the track.
+      const px = Math.cos(th) * 0.2;
+      const py = Math.sin(th) * 0.2;
+      for (const rod of rods) rod.position.set(px, 0.76 + py, rod.position.z);
+      pins.forEach((p, i) => p.position.set([1.0, 0, -1.0][i % 3]! + px, 0.76 + py, p.position.z));
+      gears.forEach((gr, i) => {
+        gr.m.rotation.z = i === gears.length - 1 ? th * 0.46 / 0.28 : th * 0.46 / 0.36 * gr.dir;
+      });
     },
   };
 }
@@ -799,7 +906,7 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
 
   kit.backdrop(g, [180, 60], [0, 18, -40], sky({ stops: [[0, '#1b1840'], [0.32, '#4a2e6a'], [0.5, '#a2507a'], [0.66, '#f08a4a'], [0.8, '#ffc070'], [1, '#5a3a3a']], sun: { x: 0.24, y: 0.72, r: 0.035, color: 'rgba(255,214,140,0.95)' }, clouds: { color: 'rgba(255,160,110,0.6)', count: 16, y: 0.5 }, ridges: CIKURAY_RIDGES('#4a2e4e', '#2c1f3a'), seed: 3 }), 3);
   // Golden-dusk rig: warm low key with crisp shadows, twilight-violet ambient fill.
-  const key = lightRig(kit, g, { sky: '#2c1f4a', ground: '#1b1840', hemi: 3.2, key: '#ffa550', keyIntensity: 3.6, keyPos: [-12, 4.2, 9], keyTarget: [0.3, 1, -0.8], extent: 7 });
+  const key = lightRig(kit, g, { sky: '#2c1f4a', ground: '#1b1840', hemi: 3.2, key: '#ffa550', keyIntensity: 3.6, keyPos: [-12, 4.2, 9], keyTarget: [0.3, 1, -0.8], extent: 7, phase: variant === 'angka-ketiga' ? 'climaxGold' : 'goldenDusk' });
   key.shadow.radius = 1.5;
   g.add(new THREE.HemisphereLight('#6a4a9a', '#2a1a20', 0.5));
 
@@ -821,8 +928,8 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
         l.m.rotation.set(frame * 0.07 + l.ph, frame * 0.05, frame * 0.03 + l.i);
       }
       const glow = finale ? smoothstep(0.12, 0.35, progress) * (0.85 + 0.15 * Math.sin(frame * 0.12)) : 0;
-      glowMat.opacity = glow;
-      plaqueGlow.material.opacity = glow * 0.8;
+      glowMat.opacity = Math.min(1, glow * 1.12);
+      plaqueGlow.material.opacity = glow * 0.95;
       const q = finale ? smoothstep(0.5, 0.62, progress) : 0;
       const pop = finale ? 1 + 0.25 * Math.exp(-Math.max(0, progress - 0.56) * 30) * Math.sin(Math.max(0, progress - 0.5) * 60) : 1;
       qMat.opacity = q;
@@ -878,13 +985,13 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   foregroundLeaves(kit, g, { base: RIGHT2.base, dir: RIGHT2.dir, count: 18, size: 0.6, spread: 1.3, seed: 70, color: '#5f8a4e' });
   const swallows = birdFlock(kit, g, { center: [-4, 9, -34], radius: 9, count: 7, seed: 71, size: 0.6 });
   kit.backdrop(g, [700, 220], [0, 60, -190], sky({ stops: [[0, '#9eb0c2'], [0.45, '#c8d2dc'], [0.75, '#e2e6e8'], [1, '#d8dcdc']], clouds: { color: 'rgba(255,255,255,0.6)', count: 30, y: 0.3 }, seed: 4 }), 4);
-  lightRig(kit, g, { sky: '#dfe6f0', ground: '#5a6450', hemi: 1.5, key: '#fff0d6', keyIntensity: 1.8, keyPos: [-6, 12, 8], keyTarget: [0, 0, -2], extent: 12 });
+  lightRig(kit, g, { sky: '#dfe6f0', ground: '#5a6450', hemi: 1.5, key: '#fff0d6', keyIntensity: 1.8, keyPos: [-6, 12, 8], keyTarget: [0, 0, -2], extent: 12, phase: 'mountainMorning' });
   return {
     id: 'platformMist',
     group: g,
     anchors: { dinda: v3(0, 0.4, -1.5), ayam: v3(0, 0.4, -0.85), anak: v3(-5.6, 0.4, -3.7) },
-    background: new THREE.Color('#c8d0d6'),
-    fog: new THREE.Fog('#d4dadc', 9, 110),
+    background: new THREE.Color('#c4d0dc'),
+    fog: new THREE.Fog('#d0dae2', 9, 110),
     update: ({ frame }) => {
       fog(frame);
       fog2(frame);
@@ -939,6 +1046,30 @@ function buildLadang(kit: WorldKit): WorldScene {
   }
   instancePrefab(kit, g, cabbageGeometry('high'), flora, cabHigh, { tint: ['#d6e6c6', '#ffffff'], seed: 56, shadow: true });
   instancePrefab(kit, g, cabbageGeometry('low'), flora, cabLow, { tint: ['#cfe0bd', '#ffffff'], seed: 57 });
+  // Morning dew: bright specular dots on the hero cabbages (two instanced sets that twinkle out of phase).
+  const dewGeo = new THREE.IcosahedronGeometry(1, 0);
+  const dewSets = [0, 1].map((set) => {
+    const mat = kit.lit('#ffffff', { transparent: true, opacity: 0.9, fog: false });
+    const places = cabHigh.slice(0, 80);
+    const inst = new THREE.InstancedMesh(dewGeo, mat, places.length * 2);
+    const dm = new THREE.Matrix4();
+    const dr = mulberry32(580 + set);
+    let n = 0;
+    for (const p of places) {
+      for (let k = 0; k < 2; k++) {
+        const a = dr() * Math.PI * 2;
+        const phi = 0.25 + dr() * 0.8;
+        const ps = p.s ?? 1;
+        const rr = 0.115 * ps;
+        dm.makeScale(0.011 * ps, 0.011 * ps, 0.011 * ps).setPosition(p.x + Math.sin(phi) * Math.cos(a) * rr, p.y + (0.1 + Math.cos(phi) * 0.106) * ps, p.z + Math.sin(phi) * Math.sin(a) * rr);
+        inst.setMatrixAt(n++, dm);
+      }
+    }
+    inst.count = n;
+    g.add(inst);
+    return mat;
+  });
+  const haze = fogBank(kit, g, 12, { min: [-14, 0.3, -12], max: [14, 1.5, -6] }, COLOR_SCRIPT.mountainMorning.haze, 55);
   instancePrefab(kit, g, leekGeometry(), flora, leeks, { seed: 58 });
   instancePrefab(kit, g, carrotTopGeometry(), flora, carrots, { seed: 59 });
   const stakeGeo = new THREE.CylinderGeometry(0.016, 0.022, 0.62, 5);
@@ -1034,18 +1165,22 @@ function buildLadang(kit: WorldKit): WorldScene {
     { x: 24, z: -80, r: 30, h: 22, color: '#56685a' },
   ]);
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#9ab0c4'], [0.5, '#e8d8c0'], [0.75, '#f6e2c2'], [1, '#c8b89a']], sun: { x: 0.7, y: 0.66, r: 0.02, color: 'rgba(255,240,200,0.9)' }, ridges: CIKURAY_RIDGES('#7a8a80', '#6a7a68'), seed: 5 }), 4);
-  lightRig(kit, g, { sky: '#dce4ea', ground: '#5a4a36', hemi: 1.4, key: '#ffe0b0', keyIntensity: 2.0, keyPos: [16, 6, 6], keyTarget: [0, 0, -2], extent: 18 });
+  lightRig(kit, g, { sky: '#dce4ea', ground: '#5a4a36', hemi: 1.4, key: '#ffe0b0', keyIntensity: 2.0, keyPos: [16, 6, 6], keyTarget: [0, 0, -2], extent: 18, phase: 'mountainMorning' });
   // Walk path of the farmer in story.ts (0 → 1.1 m along x by 60 %).
   const farmerX = (p: number): number => keyed([[0, 0], [0.6, 1.1]], p);
   return {
     id: 'ladang',
     group: g,
     anchors: { petani: v3(-4.3, 0, 0.35), petani2: v3(-1.0, 0.4, -1.45) },
-    background: new THREE.Color('#d8ccb4'),
-    fog: new THREE.Fog('#e6dcc8', 10, 100),
+    background: new THREE.Color('#d4d0c0'),
+    fog: new THREE.Fog('#dfdccc', 10, 100),
     update: ({ frame, localFrame, progress }) => {
       dew(frame);
       fog(frame);
+      haze(frame);
+      dewSets.forEach((m, i) => {
+        m.opacity = 0.35 + 0.65 * Math.max(0, Math.sin(frame * 0.11 + i * Math.PI));
+      });
       birds(frame);
       steamUpdate(breath, localFrame, 9, 40, (birth) => {
         const alt = Math.floor(birth / 9) % 2 === 0;
@@ -1096,7 +1231,7 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   const bulb = kit.glow(g, '#ffd08a', 0.7, [0.2, 2.75, -0.9], 0.8);
   kit.cyl(g, 0.01, 0.01, 0.4, [0.2, 3.0, -0.9], PALETTE.ink, { seg: 4, ink: false });
   kit.point(g, '#ffcf8a', 2.2, 8, [0.2, 2.7, -0.9]);
-  lightRig(kit, g, { sky: '#f0e2c8', ground: '#5a4030', hemi: 1.0, key: '#ffe2b0', keyIntensity: 1.8, keyPos: [-4, 6, -7], keyTarget: [0, 0.6, -0.8], extent: 6 });
+  lightRig(kit, g, { sky: '#f0e2c8', ground: '#5a4030', hemi: 1.0, key: '#ffe2b0', keyIntensity: 1.8, keyPos: [-4, 6, -7], keyTarget: [0, 0.6, -0.8], extent: 6, phase: 'colonialWarm' });
   return {
     id: 'office1930',
     group: g,
@@ -1120,6 +1255,15 @@ function buildCibatu(kit: WorldKit): WorldScene {
   platformSlab(kit, g, -16, 18, -4.6, -0.3, 0.45, cementPaint(72, '#b0a898'));
   railway(kit, g, { axis: 'x', from: -90, to: 90, at: 0.9 });
   railway(kit, g, { axis: 'x', from: -90, to: 90, at: 4.4 });
+  // Rack-rail for the mountain climb: toothed steel bar between the rails (z 0.9), x −30…30.
+  kit.box(g, [60, 0.08, 0.22], [0, 0.2, 0.9], '#4a4038', { ink: false, shadow: false });
+  const rackTeeth = new THREE.InstancedMesh(kit.track(new THREE.BoxGeometry(0.1, 0.08, 0.2)), kit.toon('#7a6a50'), 300);
+  const rackM = new THREE.Matrix4();
+  for (let i = 0; i < 300; i++) {
+    rackM.makeTranslation(-29.9 + i * 0.2, 0.28, 0.9);
+    rackTeeth.setMatrixAt(i, rackM);
+  }
+  g.add(rackTeeth);
   facade(kit, g, { x0: -14, x1: 16, face: -4.8, h: 4.2, wall: '#ece0c4', roof: '#7a3a2a', depth: 6 });
   for (const x of [-9, -6, -1.5, 3, 7, 11]) door(kit, g, x, -4.8, 1.2, 2.6, '#5a4028', 0.45);
   plateBacking(kit, g, [2.4, 0.42], [8.6, 3.6, -4.74], '#1d2a4a');
@@ -1142,7 +1286,7 @@ function buildCibatu(kit: WorldKit): WorldScene {
   const xAt = (p: number): number => -2.4 + 18 * easeInCubic(smoothstep(0.58, 1, p));
   mountains(kit, g, [{ x: 10, z: -90, r: 36, h: 24, color: '#6a7a6a' }]);
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#8aa0b8'], [0.55, '#e8d0b0'], [0.8, '#f4dcb8'], [1, '#b8a888']], ridges: CIKURAY_RIDGES('#7a8a80', '#6a7a6a'), seed: 7 }), 4);
-  lightRig(kit, g, { sky: '#e0e4ea', ground: '#5a5044', hemi: 1.3, key: '#ffd8a0', keyIntensity: 2.1, keyPos: [12, 7, 9], keyTarget: [0, 0.5, -1.5], extent: 16 });
+  lightRig(kit, g, { sky: '#e0e4ea', ground: '#5a5044', hemi: 1.3, key: '#ffd8a0', keyIntensity: 2.1, keyPos: [12, 7, 9], keyTarget: [0, 0.5, -1.5], extent: 16, phase: 'colonialWarm' });
   const chimney = new THREE.Vector3();
   return {
     id: 'cibatu',
@@ -1215,7 +1359,7 @@ function buildCarriage(kit: WorldKit): WorldScene {
   kit.mesh(g, new THREE.PlaneGeometry(40, 10), kit.track(new THREE.MeshBasicMaterial({ map: slope, toneMapped: false, fog: false })), [0, 2.5, -6], { ink: false, shadow: false });
   const beams = [-5.6, -2.8, 0, 2.8, 5.6].map((x) => kit.shaft(g, [x + 0.6, 1.9, -1.4], [x - 0.3, 0.2, 0.4], 0.5, '#ffe6b0', 0.16));
   const motes = kit.motes(g, { from: [0, 1.9, -1.4], to: [-0.3, 0.2, 0.4], radius: 3, count: 200, color: '#fff0c8', seed: 84 });
-  lightRig(kit, g, { sky: '#f0e4cc', ground: '#4a3424', hemi: 1.15, key: '#ffe0b0', keyIntensity: 1.8, keyPos: [3, 6, -8], keyTarget: [0, 0.6, 0], extent: 12 });
+  lightRig(kit, g, { sky: '#f0e4cc', ground: '#4a3424', hemi: 1.15, key: '#ffe0b0', keyIntensity: 1.8, keyPos: [3, 6, -8], keyTarget: [0, 0.6, 0], extent: 12, phase: 'colonialWarm' });
   return {
     id: 'carriage',
     group: g,
@@ -1268,7 +1412,7 @@ function buildGarut1935(kit: WorldKit): WorldScene {
   const dust = kit.dust(g, [7.5, 0.1, -0.5], [10.5, 1.2, 1.2], 90, '#e8d8b0', 0.03, 94);
   mountains(kit, g, [{ x: 20, z: -80, r: 36, h: 26, color: '#5e7060' }, { x: -20, z: -90, r: 30, h: 20, color: '#64786a' }]);
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#9ab0c8'], [0.55, '#e4dcc8'], [1, '#c0b090']], clouds: { color: 'rgba(255,255,255,0.6)', count: 18, y: 0.3 }, ridges: CIKURAY_RIDGES('#7a8a84', '#6a7a6c'), seed: 9 }), 4);
-  lightRig(kit, g, { sky: '#e2e6ea', ground: '#5a5044', hemi: 1.35, key: '#fff0d0', keyIntensity: 2.2, keyPos: [10, 12, 9], keyTarget: [3, 0, -1], extent: 18 });
+  lightRig(kit, g, { sky: '#e2e6ea', ground: '#5a5044', hemi: 1.35, key: '#fff0d0', keyIntensity: 2.2, keyPos: [10, 12, 9], keyTarget: [3, 0, -1], extent: 18, phase: 'colonialWarm' });
   return {
     id: 'garut1935',
     group: g,
@@ -1305,8 +1449,8 @@ function buildOffice1980(kit: WorldKit): WorldScene {
   for (let i = 0; i < 4; i++) kit.box(g, [0.3, 0.04, 0.22], [-1.5 + (i % 2) * 0.1, 0.78 + i * 0.04, -1.6], '#d8d0b8', { ink: 10 });
   // PJKA plate: fully legible for the opening ~3 s hold, exits once through the
   // top during the push-in and never peeks back during the final pan (frustum-audited).
-  plateBacking(kit, g, [1.0, 0.44], [-0.45, 1.95, -2.58], '#2a3a5a');
-  platePlane(kit, g, platePaint([{ t: 'PJKA', k: 1.5 }, { t: 'PERUSAHAAN JAWATAN KERETA API', k: 0.6 }], { bg: '#e6dcc0', fg: '#2a3a5a', rim: '#2a3a5a', family: ERA_FONT.industrial, spacing: 0.1, border: 'single', rule: true, seed: 16 }), [1.0, 0.44], [-0.45, 1.95, -2.58]);
+  plateBacking(kit, g, [0.9, 0.34], [-0.45, 2.38, -2.58], '#2a3a5a');
+  platePlane(kit, g, platePaint([{ t: 'PJKA', k: 1.5 }, { t: 'PERUSAHAAN JAWATAN KERETA API', k: 0.6 }], { bg: '#e6dcc0', fg: '#2a3a5a', rim: '#2a3a5a', family: ERA_FONT.industrial, spacing: 0.1, border: 'single', rule: true, seed: 16 }), [0.9, 0.34], [-0.45, 2.38, -2.58]);
   // Wall chart with falling bars.
   const chart = kit.canvas(512, 384, (c, w, h) => {
     c.fillStyle = '#efe8d4';
@@ -1326,13 +1470,13 @@ function buildOffice1980(kit: WorldKit): WorldScene {
   const flicker = kit.glow(g, '#e8f0d8', 1.0, [0, 2.9, -0.6], 0.5);
   kit.point(g, '#e4ecd4', 1.2, 7, [0, 2.8, -0.6]);
   kit.shaft(g, [1.4, 1.6, -2.7], [0.5, 0.2, -0.6], 0.7, '#d8dcc8', 0.12);
-  lightRig(kit, g, { sky: '#a8b0a0', ground: '#3a3a32', hemi: 0.65, key: '#e0e4d4', keyIntensity: 1.2, keyPos: [3, 5, -9], keyTarget: [0, 0.6, -1], extent: 10 });
+  lightRig(kit, g, { sky: '#a8b0a0', ground: '#3a3a32', hemi: 0.65, key: '#e0e4d4', keyIntensity: 1.2, keyPos: [3, 5, -9], keyTarget: [0, 0.6, -1], extent: 10, phase: 'crisisCold' });
   return {
     id: 'office1980',
     group: g,
     anchors: { chair: v3(0, 0, -0.92) },
-    background: new THREE.Color('#2a2c26'),
-    fog: new THREE.Fog('#3a3c34', 14, 60),
+    background: new THREE.Color('#222638'),
+    fog: new THREE.Fog('#2e3346', 14, 60),
     update: ({ frame }) => {
       tick(frame);
       flicker.material.opacity = 0.45 + (Math.sin(frame * 1.7) > 0.96 ? -0.2 : 0) + Math.sin(frame * 0.3) * 0.03;
@@ -1385,15 +1529,15 @@ function buildGarut1982(kit: WorldKit): WorldScene {
   foregroundLeaves(kit, g, { base: [-0.83, 2.74, 0.44], dir: [0.51, -0.86, 0.02], count: 12, size: 0.55, spread: 1.2, seed: 76, color: '#8a8a58' });
   // Telegraph line receding beside the track toward the horizon.
   telegraphLine(kit, g, { axis: 'z', from: -14, to: -230, at: 4.6, spacing: 14 });
-  kit.backdrop(g, [500, 180], [0, 50, -230], sky({ stops: [[0, '#5a5e66'], [0.5, '#8a8c8e'], [0.8, '#a2a2a0'], [1, '#7a7a74']], clouds: { color: 'rgba(70,72,78,0.5)', count: 40, y: 0.25 }, ridges: CIKURAY_RIDGES('#6a6e6c', '#5e625e'), seed: 11 }), 5);
-  lightRig(kit, g, { sky: '#b8bcc0', ground: '#4a4a44', hemi: 1.4, key: '#d8dce0', keyIntensity: 0.9, keyPos: [6, 14, 6], keyTarget: [0, 0, -2], extent: 14 });
+  kit.backdrop(g, [500, 180], [0, 50, -230], sky({ stops: [[0, '#4a4c6e'], [0.5, '#7e80a0'], [0.8, '#a2a0b8'], [1, '#6a687e']], clouds: { color: 'rgba(70,72,78,0.5)', count: 40, y: 0.25 }, ridges: CIKURAY_RIDGES('#5e607e', '#52546e'), seed: 11 }), 5);
+  lightRig(kit, g, { sky: '#b8bcc0', ground: '#4a4a44', hemi: 1.4, key: '#d8dce0', keyIntensity: 0.9, keyPos: [6, 14, 6], keyTarget: [0, 0, -2], extent: 14, phase: 'closureGrey' });
   const chimney = new THREE.Vector3();
   return {
     id: 'garut1982',
     group: g,
     anchors: { petugas: v3(-0.25, 0.45, -1.2), diam1: v3(-1.3, 0.45, -2.2), diam2: v3(-1.75, 0.45, -1.5), diam3: v3(-0.85, 0.45, -3.0) },
-    background: new THREE.Color('#8a8c8e'),
-    fog: new THREE.Fog('#9a9c9c', 16, 170),
+    background: new THREE.Color('#7a7c9a'),
+    fog: new THREE.Fog('#8a8cac', 16, 170),
     update: ({ frame, localFrame, progress }) => {
       pivot.rotation.x = 0.16 * Math.exp(-progress * 5) * Math.sin(frame * 0.22);
       pivot.rotation.z = 0.05 * Math.exp(-progress * 4) * Math.sin(frame * 0.17 + 1);
@@ -1545,7 +1689,7 @@ function buildCikajangToday(kit: WorldKit): WorldScene {
   const butterflies = Array.from({ length: 5 }, (_, i) => ({ s: kit.glow(g, ['#ffffff', '#f2c230', '#f08a3a'][i % 3] ?? '#ffffff', 0.12, [0, 0, 0], 0.9), i }));
   mountains(kit, g, [{ x: -8, z: -85, r: 40, h: 34, color: '#4e7a5a' }, { x: 30, z: -95, r: 32, h: 24, color: '#4a7258' }]);
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#4a8ad0'], [0.55, '#9cc8ec'], [0.8, '#d4e8f4'], [1, '#a8c8b0']], clouds: { color: 'rgba(255,255,255,0.9)', count: 26, y: 0.3 }, ridges: CIKURAY_RIDGES('#5a8a72', '#4e7e5e'), seed: 12 }), 3);
-  lightRig(kit, g, { sky: '#c4dcff', ground: '#6a7a4a', hemi: 1.6, key: '#fff4e0', keyIntensity: 2.6, keyPos: [8, 14, 10], keyTarget: [5, 0, -2], extent: 26 });
+  lightRig(kit, g, { sky: '#c4dcff', ground: '#6a7a4a', hemi: 1.6, key: '#fff4e0', keyIntensity: 2.6, keyPos: [8, 14, 10], keyTarget: [5, 0, -2], extent: 26, phase: 'todayBright' });
   return {
     id: 'cikajangToday',
     group: g,
@@ -1599,6 +1743,14 @@ function buildGarut2022(kit: WorldKit): WorldScene {
   // Steel canopy with translucent roof.
   for (let x = -12; x <= 18; x += 5) for (const z of [-1.0, -4.0]) kit.cyl(g, 0.08, 0.08, 3.4, [x, 0.45 + 1.7, z], '#4a5a6a', { seg: 10 });
   kit.box(g, [32, 0.06, 3.9], [3, 3.85, -2.5], kit.toon('#c8dce8', { transparent: true, opacity: 0.8 }), { ink: 20 });
+  // Foreground framing (skill v2.2 §6): heavy riveted iron post on the platform edge, ~2.4–3.9 m from the
+  // lens. Frustum-audited vs story.ts cameras: it only grazes the far-left frame edge (right edge at
+  // NDC ≈ −0.86…−1.0) while the map (NDC ≥ −0.76), GARUT plate and faces stay clear.
+  const iron = kit.toon('#33414f');
+  kit.cyl(g, 0.085, 0.1, 3.4, [-1.95, 0.45 + 1.7, -0.7], iron, { seg: 12 });
+  kit.box(g, [0.3, 0.14, 0.3], [-1.95, 0.52, -0.7], iron, { ink: 30 });
+  kit.cyl(g, 0.13, 0.13, 0.09, [-1.95, 1.7, -0.7], '#4a5a6a', { seg: 12, ink: 30 });
+  kit.box(g, [0.5, 0.1, 0.1], [-2.2, 3.7, -0.7], iron, { ink: 30, rot: [0, 0, 0.55] });
   // Route map: Cibatu–Garut active, Garut–Cikajang planned.
   const map = kit.canvas(1024, 576, (c, w, h) => {
     c.fillStyle = '#ffffff';
@@ -1658,7 +1810,7 @@ function buildGarut2022(kit: WorldKit): WorldScene {
   const xAt = (p: number): number => lerp(40, 1.2, easeOutCubic(smoothstep(0.35, 0.95, p)));
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#3a7ad0'], [0.55, '#8cc0ec'], [0.8, '#d0e6f4'], [1, '#a8c0b0']], clouds: { color: 'rgba(255,255,255,0.9)', count: 24, y: 0.3 }, ridges: CIKURAY_RIDGES('#5a8a72', '#4e7e5e'), seed: 13 }), 3);
   mountains(kit, g, [{ x: 30, z: -90, r: 38, h: 30, color: '#4e7a5a' }]);
-  lightRig(kit, g, { sky: '#c4dcff', ground: '#6a6a5a', hemi: 1.6, key: '#fff6e6', keyIntensity: 2.5, keyPos: [10, 14, 10], keyTarget: [2, 0, -2], extent: 20 });
+  lightRig(kit, g, { sky: '#c4dcff', ground: '#6a6a5a', hemi: 1.6, key: '#fff6e6', keyIntensity: 2.5, keyPos: [10, 14, 10], keyTarget: [2, 0, -2], extent: 20, phase: 'todayBright' });
   return {
     id: 'garut2022',
     group: g,
@@ -1720,6 +1872,8 @@ uniform float sepia;
 uniform float grey;
 uniform float tone;
 uniform float flash;
+uniform sampler2D tPrev;
+uniform float xfade;
 
 float linearDepth(vec2 uv) {
   float z = texture2D(tDepth, uv).x * 2.0 - 1.0;
@@ -1773,6 +1927,8 @@ void main() {
   col = toSRGB(clamp(col, 0.0, 1.0));
   float grain = 0.035 + sepia * 0.03;
   col += (hash(gl_FragCoord.xy + mod(frame, 64.0) * 17.31) - 0.5) * grain;
+  // Cross-dissolve: blend over the outgoing shot's finished (graded, sRGB) frame.
+  if (xfade > 0.0) col = mix(col, texture2D(tPrev, vUv).rgb, xfade);
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -1785,16 +1941,21 @@ export interface FilmParams {
   grey: number;
   tone: number;
   flash: number;
+  /** 0..1 blend toward the outgoing shot captured with `renderPrev()` (cross-dissolve). */
+  xfade?: number;
 }
 
 export class FilmPipeline {
   private target: THREE.WebGLRenderTarget;
+  /** Finished frame of the outgoing shot during a cross-dissolve. */
+  private prev: THREE.WebGLRenderTarget;
   private readonly quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly quadScene = new THREE.Scene();
   private readonly quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
   constructor(width: number, height: number) {
     this.target = this.makeTarget(width, height);
+    this.prev = new THREE.WebGLRenderTarget(width, height);
     const material = new THREE.ShaderMaterial({
       vertexShader: FILM_VERTEX,
       fragmentShader: FILM_FRAGMENT,
@@ -1813,6 +1974,8 @@ export class FilmPipeline {
         grey: { value: 0 },
         tone: { value: 0.4 },
         flash: { value: 0 },
+        tPrev: { value: this.prev.texture },
+        xfade: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -1831,17 +1994,23 @@ export class FilmPipeline {
     this.target.dispose();
     this.target.depthTexture?.dispose();
     this.target = this.makeTarget(width, height);
+    this.prev.setSize(width, height);
     const u = this.quad.material.uniforms;
     if (u.tColor) u.tColor.value = this.target.texture;
     if (u.tDepth) u.tDepth.value = this.target.depthTexture;
     u.resolution?.value.set(width, height);
   }
 
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, params: FilmParams): void {
+  /** Renders the outgoing shot's finished frame into the dissolve buffer (call before `render`). */
+  renderPrev(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, params: FilmParams): void {
+    this.render(renderer, scene, camera, { ...params, xfade: 0 }, this.prev);
+  }
+
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, params: FilmParams, output: THREE.WebGLRenderTarget | null = null): void {
     renderer.setRenderTarget(this.target);
     renderer.clear();
     renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(output);
     const u = this.quad.material.uniforms;
     const set = (k: string, v: number): void => {
       const uniform = u[k];
@@ -1858,12 +2027,15 @@ export class FilmPipeline {
     set('grey', params.grey);
     set('tone', params.tone);
     set('flash', params.flash);
+    set('xfade', output === this.prev ? 0 : (params.xfade ?? 0));
     renderer.render(this.quadScene, this.quadCamera);
+    if (output) renderer.setRenderTarget(null);
   }
 
   dispose(): void {
     this.target.depthTexture?.dispose();
     this.target.dispose();
+    this.prev.dispose();
     this.quad.geometry.dispose();
     this.quad.material.dispose();
   }

@@ -20,6 +20,7 @@ Implementasi referensi di repo ini:
 | `src/cikajang/fonts.ts` | Peta font per era (`ERA_FONT`) + CSS + Font Guard `1200 ms`. |
 | `src/cikajang/Cikajang.tsx` | StageManager, contact shadow, frozen sun, efek komikal 2D overlay (`speedLines`/`sweatDrop`), caption tajam anti-pudar, hook macro slam, font guard. |
 | `tools/align_subtitles.py` | Penyelaras `words.json` berbasis akustik (`Whisper` / `FFmpeg silencedetect` + RMS speech-island DP + suku kata angka Indonesia). |
+| `src/cikajang/fx.ts` | Efek komikal 2D deterministik: `FxLayer` (sprite `sweat`/`question`/`exclaim`/`zzz`/`spark` menempel di kepala tokoh) + `speedLinesAt`/`speedLineSet` (overlay radial layar). |
 
 Kalau ragu, **tiru kode acuan**. Dilarang keras membuat: manekin realistis, karakter bola putih polos tanpa ciri khas, kaki tongkat, jalan melompat seperti wayang, bahu menonjol di depan dada, T-pose kaku, atau teks papan/tahun yang terpotong.
 
@@ -157,3 +158,27 @@ Setiap proyek wajib mendefinisikan **Color Script Table** di `story.ts` yang mem
 - [ ] Zero clipped text: seluruh papan nama, tahun, dan prasasti (`Station Tjikadjang`, `DIENSTREGELING 1935`, `CIKAJANG`) 100% utuh dan tidak tertutup tangan/prop.
 - [ ] Hero flora komposit + hero prop detail + skala megah + font guard block sebelum world dibangun.
 - [ ] `npx tsc --noEmit` = 0 error. **Jangan render di cloud.**
+
+---
+
+## 10. Konvensi Implementasi (acuan kode Cikajang)
+
+**Data & timing**
+- `python3 tools/align_subtitles.py public/<p>/voice.wav public/<p>/sentences.json --out public/<p>/words.json` setiap kali voice/naskah berubah; token kata = `text.split()` kalimat. Jam `06.04` dibobot "enam lewat empat".
+- Beat visual (ekspresi, FX, kick) dihitung dari `words.json`: `frame = round(detik·30)`, `progress = (frame − shot.from)/(shot.to − shot.from − 1)`, lalu taruh **0–3 frame sebelum** kata.
+
+**Karakter (`toon.ts`)**
+- `ToonDrive.light = { rim, rimStrength, side }` diisi `Cikajang.tsx` dari `COLOR_SCRIPT[shot.phase]`; `side` = sisi layar arah key light (dot arah directional light shadow-caster dengan vektor kanan kamera). Crescent shade, rim, dan tinta tebal (`inkVar`: stroke 0.75× + salinan bergeser ke sisi bayangan/bawah → ≈1.35×) semuanya mengikuti `side`.
+- Ekspresi memakai `snapKeys()` (bukan `blendKeys`): mix 0→1 dalam `EXPRESSION_SNAP_FRAMES = 2` tepat di key; `expressionAge` memicu kedip paksa 4 frame + jolt kepala ±2 px.
+- Z-order `FRONT_POSES`: lengan belakang → torso → kepala → body prop → lengan depan → semua mitten → hand prop. Walk: `walkPhase = travelled/scale · WALK_PHASE_PER_METRE` (anti-skating).
+- Anchor FX kepala: `HEAD_CENTER_M`, `HEAD_HALF_H_M`, `HEAD_HALF_W_M` (meter pada skala 1 — kalikan `member.scale`).
+
+**Shot data (`story.ts`)**
+- `Shot.phase: ColorPhase` wajib; `COLOR_SCRIPT` = key / shadow / rim / glow / haze per fase. `lightRig({ phase })` di `worlds.ts` mencampur hemi, key, dan fill rim dari tabel yang sama.
+- `Shot.fx: FxCue[]` = `{ kind, at, frames, cast?, pos?, size? }` — `speedLines` efek layar; selain itu menempel ke kepala `cast[i]` atau `pos` dunia. 10–30 frame, hanya di beat kunci.
+- `cut: 'xfade'` = cross-dissolve `XFADE_FRAMES = 15`: `crossfadeAt(frame)` → `FilmPipeline.renderPrev()` merender frame terakhir shot sebelumnya (sudah di-grade) ke buffer, lalu `render(..., { xfade })` mencampurnya. Panggung di-pose via `poseAt(frame)` yang murni, jadi aman dipanggil dua kali per frame.
+
+**Teks & kamera**
+- Audit frustum memakai `sampleCamera()` nyata (creep, kick, roll). Papan yang keluar frame karena dolly: terbaca utuh ≥ 2 dtk dulu, keluar **sekali** di bagian cepat smootherstep, tidak mengintip terpotong lagi.
+- Tangan tokoh yang menelusuri prasasti mendarat di **bingkai/tepi** prasasti, tidak pernah di atas huruf (hitung titik mitten di kartu 768×1024 → meter × scale).
+- Font guard memblokir mount `<ThreeCanvas>` sampai font siap (atau 1200 ms) karena tekstur papan dilukis saat world dibangun.
