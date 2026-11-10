@@ -1,11 +1,13 @@
 {
-  "name": "persis-video",
+  "name": "konten-video",
   "version": "1.0.0",
+  "description": "PyxisLab 3D Animated Video Shorts Engine powered by Remotion, Three.js, and Pyxis BeanHead Style.",
   "private": true,
   "scripts": {
     "studio": "remotion studio",
     "typecheck": "tsc --noEmit",
-    "sfx": "python sfx/run_persis_sfx.py"
+    "render:cikajang": "remotion render src/index.ts Cikajang out/cikajang.mp4 --gl=angle --concurrency=1 --scale=0.75",
+    "render:persis": "remotion render src/index.ts Persis out/persis.mp4 --gl=angle --concurrency=1 --scale=0.75"
   },
   "dependencies": {
     "@react-three/fiber": "^9.0.0",
