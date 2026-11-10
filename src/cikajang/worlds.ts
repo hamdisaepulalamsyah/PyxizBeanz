@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { PALETTE, type WorldFrame, WorldKit, mulberry32 } from '../persis/worlds';
 import type { Vec3, WorldId } from './story';
 import { clamp01, easeInCubic, easeOutCubic, keyed, lerp, smoothstep } from './story';
+import { ERA_FONT } from './fonts';
+import { birdFlock, cabbageGeometry, carrotTopGeometry, floraMaterial, foregroundLeaves, instancePrefab, leekGeometry, ridgeGeometry, telegraphLine, type Placement } from './flora';
+import { carvedStonePaint, fitFont, inkStampPaint, muralLetteringPaint, platePaint, platePlane, plateBacking, stencilPaint } from './signage';
 import { DESK_HEIGHT, SEAT_HEIGHT } from './toon';
 
 /**
@@ -291,7 +294,7 @@ function carvedSign(kit: WorldKit, g: THREE.Object3D, lines: readonly string[], 
     const lh = ch / (lines.length + 0.5);
     lines.forEach((line, i) => {
       const y = lh * (i + 0.78);
-      c.font = `900 ${Math.round(lh * (i === 0 ? 0.66 : 0.56))}px Georgia, serif`;
+      fitFont(c, line, '900', ERA_FONT.editorial, Math.round(lh * (i === 0 ? 0.66 : 0.56)), cw * 0.86, 3);
       // Carved: dark recess, light lower lip, painted cream face.
       c.fillStyle = 'rgba(30,16,8,0.85)';
       c.fillText(line, cw / 2 - 3, y - 3);
@@ -300,11 +303,12 @@ function carvedSign(kit: WorldKit, g: THREE.Object3D, lines: readonly string[], 
       c.fillStyle = '#f3e6c4';
       c.fillText(line, cw / 2, y);
     });
+    c.letterSpacing = '0px';
     c.fillStyle = 'rgba(30,20,10,0.25)';
     for (let i = 0; i < 70; i++) c.fillRect(r() * cw, r() * ch, 2 + r() * 8, 2 + r() * 4);
   });
   kit.box(grp, [w + 0.04, h + 0.04, 0.12], [0, 0, -0.06], '#5a3a20', { ink: 30 });
-  kit.mesh(grp, new THREE.PlaneGeometry(w, h), kit.toon('#ffffff', { map: tex }), [0, 0, 0.002], { ink: false, shadow: false });
+  kit.mesh(grp, new THREE.PlaneGeometry(w, h), kit.toon('#ffffff', { map: tex, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.3 }), [0, 0, 0.002], { ink: false, shadow: false });
   const iron = kit.toon('#2c2a2e');
   for (const sy of [-1, 1]) kit.box(grp, [w + 0.14, 0.06, 0.15], [0, sy * (h / 2 + 0.03), -0.04], iron, { ink: 30 });
   for (const sx of [-1, 1]) kit.box(grp, [0.06, h + 0.18, 0.15], [sx * (w / 2 + 0.03), 0, -0.04], iron, { ink: 30 });
@@ -744,48 +748,27 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
   });
   facade(kit, g, { x0: -25, x1: 25, face: -0.9, h: 4.2, wall: plaster, roof: '#8a3a2a', depth: 8 });
   door(kit, g, 1.2, -0.9, 1.5, 2.6, '#7a4a2a');
-  kit.label(g, ['TJIKADJANG'], [1.6, 0.3], [1.2, 3.0, -0.84], { bg: '#efe3c4', fg: '#3a2412', font: '800 {size}px Georgia, serif', border: '#5a3a24' });
+  // 1930s Staatsspoorwegen enamel plate: wide-tracked Cinzel, double border, brass rivets.
+  plateBacking(kit, g, [1.6, 0.34], [1.2, 3.0, -0.84], '#3a2a1c');
+  platePlane(kit, g, platePaint([{ t: 'TJIKADJANG' }], { bg: '#efe3c4', fg: '#1d2a4a', rim: '#1d2a4a', family: ERA_FONT.colonial, spacing: 0.16, rivets: true, seed: 4 }), [1.6, 0.34], [1.2, 3.0, -0.84]);
+  peronBench(kit, g, [-2.6, 0, -0.5], 1.6);
   for (const x of [-7.5, -4.2, 4.6, 7.8]) {
     windowPane(kit, g, [x, 1.9, -0.86], 1.0, 1.4, '#3a3048', '#5a3a24');
-  peronBench(kit, g, [-2.6, 0, -0.5], 1.6);
     for (const s of [-1, 1]) kit.box(g, [0.5, 1.5, 0.05], [x + s * 0.8, 1.9, -0.8], '#4f6b4a', { ink: 20, rot: [0, s * 0.5, 0] });
   }
 
   // Carved stone plaque "1930 – 1982" beside the door, at Dinda's hand height.
   const plaquePos: Vec3 = [-0.12, 1.08, -0.88];
   kit.box(g, [0.78, 0.36, 0.05], [plaquePos[0], plaquePos[1], plaquePos[2] - 0.01], '#8a7a62', { ink: 20 });
-  const carve = (glow: boolean): Paint => (c, w, h) => {
-    if (!glow) {
-      c.fillStyle = '#b8a888';
-      c.fillRect(0, 0, w, h);
-      const r = mulberry32(5);
-      for (let i = 0; i < 300; i++) {
-        c.fillStyle = `rgba(80,70,55,${r() * 0.18})`;
-        c.fillRect(r() * w, r() * h, 3, 3);
-      }
-    }
-    c.font = `800 ${h * 0.62}px Georgia, serif`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    if (!glow) {
-      c.fillStyle = 'rgba(255,248,230,0.55)';
-      c.fillText('1930 – 1982', w / 2 + 3, h / 2 + 4);
-      c.fillStyle = '#4a3c2c';
-    } else {
-      c.shadowColor = '#ffcf6a';
-      c.shadowBlur = 24;
-      c.fillStyle = '#ffe9a8';
-    }
-    c.fillText('1930 – 1982', w / 2, h / 2);
-  };
-  kit.mesh(g, new THREE.PlaneGeometry(0.7, 0.28), kit.toon('#ffffff', { map: kit.canvas(1024, 410, carve(false)) }), [plaquePos[0], plaquePos[1], plaquePos[2] + 0.02], { ink: false, shadow: false });
-  const glowMat = kit.track(new THREE.MeshBasicMaterial({ map: kit.canvas(1024, 410, carve(true)), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  // Chiselled stone (editorial serif): recess shadow, lower rim highlight, moss at the edges.
+  platePlane(kit, g, carvedStonePaint('1930 – 1982', { seed: 5 }), [0.7, 0.28], [plaquePos[0], plaquePos[1], plaquePos[2] + 0.02], { glow: 0.3 });
+  const glowMat = kit.track(new THREE.MeshBasicMaterial({ map: kit.canvas(1024, 410, carvedStonePaint('1930 – 1982', { glow: true })), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
   kit.mesh(g, new THREE.PlaneGeometry(0.7, 0.28), glowMat, [plaquePos[0], plaquePos[1], plaquePos[2] + 0.025], { ink: false, shadow: false });
   const plaqueGlow = kit.glow(g, '#ffc860', 1.4, [plaquePos[0], plaquePos[1], plaquePos[2] + 0.1], 0);
 
   // The third number: a glowing "?".
   const qTex = kit.canvas(512, 512, (c, w, h) => {
-    c.font = `800 ${h * 0.86}px Georgia, serif`;
+    c.font = `900 ${h * 0.86}px ${ERA_FONT.editorial}`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.shadowColor = '#ffb84a';
@@ -869,7 +852,8 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   door(kit, g, -2.5, -4.9, 1.4, 2.5, '#6a4a2a');
   door(kit, g, 3.5, -4.9, 1.4, 2.5, '#6a4a2a');
   for (const x of [-8, -5.5, 0.5, 6.5, 9]) windowPane(kit, g, [x, 1.9, -4.86], 0.9, 1.3, '#3a4458', '#4a3a2a');
-  kit.label(g, ['CIKAJANG'], [2.6, 0.45], [0.5, 3.2, -4.84], { bg: '#f2ead6', fg: '#1d2a4a', font: '800 {size}px Georgia, serif', border: '#1d2a4a' });
+  plateBacking(kit, g, [2.6, 0.45], [0.5, 3.2, -4.84], '#1d2a4a');
+  platePlane(kit, g, platePaint([{ t: 'CIKAJANG' }], { bg: '#f2ead6', fg: '#1d2a4a', rim: '#1d2a4a', family: ERA_FONT.colonial, spacing: 0.2, rivets: true, seed: 6 }), [2.6, 0.45], [0.5, 3.2, -4.84]);
   // Canopy over the platform.
   for (let x = -10; x <= 10; x += 4) kit.cyl(g, 0.07, 0.08, 3.3, [x, 0.4 + 1.65, -1.2], '#3a4a5a', { seg: 10 });
   kit.box(g, [22, 0.1, 3.9], [0, 3.75, -2.9], '#6a5a4a', { ink: 20, rot: [0.05, 0, 0] });
@@ -917,42 +901,130 @@ function buildLadang(kit: WorldKit): WorldScene {
   const g = new THREE.Group();
   groundPlane(kit, g, '#5a4632', { paint: speckle('#5e4a34', ['#4a3826', '#6e5840', '#3c2c1e'], 51), repeat: 90 });
   const soil = kit.toon('#6a5038');
-  const leafy = kit.facet('#6aa040');
-  const leafy2 = kit.facet('#4f8a36');
-  const cabbage = kit.track(new THREE.IcosahedronGeometry(0.17, 0));
+  // Hero flora: composite cabbages (veined pale heart + six cupped outer leaves) on wavy soil ridges,
+  // leek and carrot-top rows, bamboo terrace stakes. All instanced from merged, vertex-coloured prefabs.
+  const flora = floraMaterial(kit);
+  const rnd = mulberry32(55);
+  const cabHigh: Placement[] = [];
+  const cabLow: Placement[] = [];
+  const leeks: Placement[] = [];
+  const carrots: Placement[] = [];
+  const stakes: Placement[] = [];
   const terraces = 7;
+  const rowKind = (k: number, front: boolean): 'cab' | 'leek' | 'carrot' => {
+    if (front) return k % 3 === 2 ? 'carrot' : 'cab';
+    return k % 3 === 0 ? 'leek' : 'cab';
+  };
+  const X0 = -13.7;
+  const X1 = 6.9;
   for (let k = 0; k < terraces; k++) {
     const h = 0.4 * (k + 1);
     const z = -1.5 - k * 2.2;
     kit.box(g, [37, h, 2.2], [-11.5, h / 2, z], soil, { ink: 20 });
-    for (const row of [-0.5, 0.4]) {
-      const n = 70;
-      const inst = new THREE.InstancedMesh(cabbage, (k + (row > 0 ? 1 : 0)) % 2 ? leafy : leafy2, n);
-      const m = new THREE.Matrix4();
-      for (let i = 0; i < n; i++) {
-        m.makeTranslation(-29.5 + i * 0.52 + (row > 0 ? 0.26 : 0), h + 0.12, z + row);
-        inst.setMatrixAt(i, m);
+    for (const front of [false, true]) {
+      const rz = z + (front ? 0.4 : -0.5);
+      kit.mesh(g, ridgeGeometry(X1 - X0 + 1, 0.64, 0.15, 60 + k * 2 + (front ? 1 : 0)), flora, [(X0 + X1) / 2, h - 0.01, rz], { ink: false, shadow: false });
+      const kind = rowKind(k, front);
+      for (let x = X0 + (front ? 0.26 : 0); x <= X1; x += 0.52) {
+        const px = x + (rnd() - 0.5) * 0.1;
+        const pz = rz + (rnd() - 0.5) * 0.06;
+        const hero = k === 0 && front ? 1.2 : 0.85 + rnd() * 0.3;
+        if (kind === 'cab') (k <= 2 ? cabHigh : cabLow).push({ x: px, y: h + 0.1, z: pz, s: hero });
+        else if (kind === 'leek') leeks.push({ x: px, y: h + 0.1, z: pz, s: 1 + rnd() * 0.3 });
+        else carrots.push({ x: px, y: h + 0.12, z: pz, s: 0.9 + rnd() * 0.3 });
       }
-      inst.castShadow = true;
-      inst.receiveShadow = true;
-      g.add(inst);
     }
+    // Bamboo ajir along the terrace lip with a horizontal rail.
+    for (let x = X0 + 0.4; x <= X1; x += 2.4) stakes.push({ x, y: h, z: z + 1.06, s: 1, r: 0 });
+    kit.mesh(g, new THREE.CylinderGeometry(0.014, 0.014, X1 - X0, 5), '#b2a258', [(X0 + X1) / 2, h + 0.36, z + 1.06], { rot: [0, 0, Math.PI / 2], ink: false, shadow: false });
   }
-  // Dirt path + rice sacks.
+  instancePrefab(kit, g, cabbageGeometry('high'), flora, cabHigh, { tint: ['#d6e6c6', '#ffffff'], seed: 56, shadow: true });
+  instancePrefab(kit, g, cabbageGeometry('low'), flora, cabLow, { tint: ['#cfe0bd', '#ffffff'], seed: 57 });
+  instancePrefab(kit, g, leekGeometry(), flora, leeks, { seed: 58 });
+  instancePrefab(kit, g, carrotTopGeometry(), flora, carrots, { seed: 59 });
+  const stakeGeo = new THREE.CylinderGeometry(0.016, 0.022, 0.62, 5);
+  stakeGeo.translate(0, 0.31, 0);
+  instancePrefab(kit, g, stakeGeo, kit.toon('#b2a258'), stakes, { seed: 60 });
+
+  // Mountain shrubs and trees: tea-like clumps at the east end of the terraces, round trees on the far slope.
+  const shrubGeo = new THREE.IcosahedronGeometry(0.34, 1);
+  shrubGeo.scale(1.3, 0.8, 1);
+  shrubGeo.translate(0, 0.25, 0);
+  const shrubs: Placement[] = [];
+  for (let i = 0; i < 46; i++) {
+    const k = i % terraces;
+    shrubs.push({ x: 3.5 + rnd() * 3.6, y: 0.4 * (k + 1) - 0.02, z: -1.5 - k * 2.2 + (rnd() - 0.5) * 1.6, s: 0.7 + rnd() * 0.8 });
+  }
+  for (let i = 0; i < 30; i++) shrubs.push({ x: 7.6 + rnd() * 1.4, y: 0, z: -14 + rnd() * 15, s: 0.9 + rnd() * 1.1 });
+  instancePrefab(kit, g, shrubGeo, kit.facet('#4f8a46'), shrubs, { seed: 61 });
+  const trunk = new THREE.CylinderGeometry(0.1, 0.16, 2.4, 6);
+  trunk.translate(0, 1.2, 0);
+  const crown = new THREE.IcosahedronGeometry(1.3, 1);
+  crown.translate(0, 3.1, 0);
+  const trees: Placement[] = [];
+  for (let i = 0; i < 16; i++) trees.push({ x: 14 + rnd() * 20, y: 0, z: -8 - rnd() * 40, s: 1.2 + rnd() * 1.4 });
+  for (let i = 0; i < 10; i++) trees.push({ x: -34 + rnd() * 18, y: 0, z: -30 - rnd() * 40, s: 1.6 + rnd() * 1.6 });
+  instancePrefab(kit, g, trunk, kit.toon('#4a3626'), trees, { seed: 62 });
+  instancePrefab(kit, g, crown, kit.facet('#3f7c48'), trees, { seed: 62 });
+
+  // Dirt path + stencilled crate and rice sacks.
   kit.mesh(g, new THREE.PlaneGeometry(60, 1.6), '#8a7458', [-6, 0.005, 0.4], { rot: [-Math.PI / 2, 0, 0], ink: false, shadow: false });
-  for (const [x, z, ry] of [[-2.4, 0.9, 0.2], [-1.95, 1.05, -0.3], [-2.2, 0.85, 0.1]] as const) {
+  for (const [x, z, ry] of [[-2.9, 0.85, 0.2], [-1.75, 1.0, -0.3]] as const) {
     const s = kit.mesh(g, new THREE.SphereGeometry(0.28, 12, 8), '#d8c8a0', [x, 0.26, z], { ink: 30, rot: [0, ry, 0] });
     s.scale.set(1, 0.9, 0.75);
   }
-  kit.label(g, ['BERAS'], [0.3, 0.12], [-2.2, 0.62, 1.12], { bg: '#d8c8a0', fg: '#4a3a22', font: '800 {size}px Georgia, serif' });
-  // Fruit basket by the sacks.
-  kit.cyl(g, 0.3, 0.22, 0.28, [-1.3, 0.14, 1.0], '#b88a4a', { seg: 14 });
-  for (let i = 0; i < 6; i++) kit.mesh(g, new THREE.SphereGeometry(0.09, 10, 8), i % 2 ? '#e0742a' : '#d8c24a', [-1.42 + (i % 3) * 0.12, 0.32, 0.94 + Math.floor(i / 3) * 0.12], { ink: 30 });
-  // The empty railway beyond the fields.
+  const crateWood = kit.toon('#ffffff', { map: kit.canvas(256, 256, planksPaint('#9a7a4c', 52)) });
+  kit.box(g, [0.78, 0.44, 0.5], [-2.3, 0.22, 0.9], crateWood, { ink: 20 });
+  // BERAS: charcoal stencil with bridges, painted on the crate front.
+  platePlane(kit, g, stencilPaint('BERAS', planksPaint('#a07e50', 53)), [0.7, 0.34], [-2.3, 0.22, 1.156], { glow: 0.2 });
+
+  // Harvest basket (bakul): woven wall, heaped cabbages, carrots and tomatoes.
+  const bx = -1.2;
+  const bz = 1.0;
+  const weave = kit.toon('#ffffff', { map: kit.canvas(256, 128, (c, w, h) => {
+    c.fillStyle = '#b88a4a';
+    c.fillRect(0, 0, w, h);
+    c.strokeStyle = '#7a5428';
+    c.lineWidth = 3;
+    for (let i = 0; i < 8; i++) {
+      c.beginPath();
+      c.moveTo(0, (i + 0.5) * (h / 8));
+      c.lineTo(w, (i + 0.5) * (h / 8));
+      c.stroke();
+    }
+    for (let i = 0; i < 24; i++) {
+      c.beginPath();
+      c.moveTo(i * (w / 24), 0);
+      c.lineTo(i * (w / 24), h);
+      c.stroke();
+    }
+  }, { repeat: [2, 1] }), side: THREE.DoubleSide });
+  kit.mesh(g, new THREE.CylinderGeometry(0.36, 0.26, 0.36, 18, 1, true), weave, [bx, 0.18, bz], { ink: false });
+  kit.mesh(g, new THREE.TorusGeometry(0.36, 0.022, 6, 24), '#7a5428', [bx, 0.36, bz], { rot: [Math.PI / 2, 0, 0], ink: false });
+  kit.mesh(g, new THREE.TorusGeometry(0.34, 0.02, 6, 16, Math.PI), '#7a5428', [bx, 0.36, bz], { ink: false, rot: [0, 0, 0] });
+  const basketCabbages: Placement[] = [
+    { x: bx - 0.13, y: 0.3, z: bz + 0.05, s: 0.72, r: 0.4 },
+    { x: bx + 0.14, y: 0.3, z: bz - 0.06, s: 0.7, r: 1.7 },
+    { x: bx - 0.02, y: 0.36, z: bz - 0.2, s: 0.62, r: 2.9 },
+  ];
+  instancePrefab(kit, g, cabbageGeometry('high'), flora, basketCabbages, { seed: 63 });
+  const carrotGeo = new THREE.ConeGeometry(0.032, 0.24, 7);
+  carrotGeo.rotateX(Math.PI);
+  carrotGeo.translate(0, -0.12, 0);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const c = kit.mesh(g, carrotGeo, '#e8782a', [bx + Math.cos(a) * 0.2, 0.46, bz + Math.sin(a) * 0.2 + 0.1], { ink: false, shadow: false, rot: [Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5] });
+    kit.mesh(c, new THREE.ConeGeometry(0.03, 0.12, 5), '#5a9a3a', [0, 0.06, 0], { ink: false, shadow: false });
+  }
+  for (let i = 0; i < 5; i++) kit.mesh(g, new THREE.SphereGeometry(0.065, 10, 8), '#d83a2a', [bx - 0.2 + (i % 3) * 0.17, 0.4 + (i > 2 ? 0.05 : 0), bz + 0.2 + Math.floor(i / 3) * 0.1], { ink: 30 });
+  // The empty railway beyond the fields, with its telegraph line.
   railway(kit, g, { axis: 'z', from: 10, to: -90, at: 9.6 });
+  telegraphLine(kit, g, { axis: 'z', from: 4, to: -92, at: 11.6, spacing: 16 });
   grass(kit, g, { min: [7.4, 0, -60], max: [30, 0, 8], count: 900, size: 0.45, seed: 52, colors: ['#5a7a3a', '#6e8e48'] });
-  // Bamboo clump.
+  // Bamboo clump with leaf plumes.
   for (let i = 0; i < 9; i++) kit.cyl(g, 0.05, 0.06, 5 + (i % 3), [12 + (i % 3) * 0.3, 2.6, -4 - Math.floor(i / 3) * 0.3], '#6a8a3a', { seg: 8, rot: [0, 0, (i - 4) * 0.04] });
+  foregroundLeaves(kit, g, { base: [12.4, 4.8, -4.4], dir: [0.4, 0.5, 0], count: 34, size: 1.1, spread: 2.6, seed: 64, color: '#7ea84a' });
+  const birds = birdFlock(kit, g, { center: [-6, 7.5, -26], radius: 9, count: 7, seed: 65, size: 0.55 });
   const dew = kit.dust(g, [-10, 0.3, -6], [6, 1.6, 1], 200, '#ffffff', 0.02, 53);
   const breath = puffs(kit, g, 10, '#ffffff');
   const fog = fogBank(kit, g, 24, { min: [-30, 1, -22], max: [20, 4, -4] }, '#f2eadc', 54);
@@ -973,6 +1045,7 @@ function buildLadang(kit: WorldKit): WorldScene {
     update: ({ frame, localFrame, progress }) => {
       dew(frame);
       fog(frame);
+      birds(frame);
       steamUpdate(breath, localFrame, 9, 40, (birth) => {
         const alt = Math.floor(birth / 9) % 2 === 0;
         return alt ? v3(-4.3 + farmerX(clamp01(birth / 299)) + 0.1, 1.12, 0.45) : v3(-0.95, 1.46, -1.3);
