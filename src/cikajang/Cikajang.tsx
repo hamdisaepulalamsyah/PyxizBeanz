@@ -35,7 +35,8 @@ import {
   smoothstep,
   stepped,
 } from './story';
-import { type ToonActor, createToonActor } from './toon';
+import { type ToonActor, WALK_PHASE_PER_METRE, createToonActor } from './toon';
+import { DIEGETIC_FONT_CSS, DIEGETIC_FONT_FACES, FONT_GUARD_MS } from './fonts';
 import { FilmPipeline, WorldKit, type WorldScene, buildWorld } from './worlds';
 
 export type CikajangProps = {
@@ -46,9 +47,6 @@ export type CikajangProps = {
 export const CIKAJANG_DEFAULT_PROPS: CikajangProps = { words: [], sentences: [] };
 
 const FONT_FAMILY = '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif';
-const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;800&display=block';
-/** Never wait longer than this for Google Fonts; fall back to the system sans. */
-const FONT_TIMEOUT_MS = 1200;
 
 async function fetchJson(name: string, signal: AbortSignal, optional: boolean): Promise<unknown> {
   const res = await fetch(staticFile(name), { signal });
@@ -273,7 +271,7 @@ const CikajangScene: React.FC = () => {
           nod: keyed(member.nod ?? [[0, 0]], progress),
           armRight: blendKeys(member.right, 'side', progress),
           armLeft: blendKeys(member.left, 'side', progress),
-          walkPhase: moving ? (travelled / member.scale) * 11 : null,
+          walkPhase: moving ? (travelled / member.scale) * WALK_PHASE_PER_METRE : null,
           walkDir: offsetNow.x >= offsetPrev.x ? 1 : -1,
           drawProgress: smoothstep(0.06, 0.62, progress),
         },
@@ -297,25 +295,33 @@ const CikajangScene: React.FC = () => {
 
 // ── 2D overlays ─────────────────────────────────────────────────────────────
 
-/** Loads Plus Jakarta Sans; continues after FONT_TIMEOUT_MS with the system font so renders never time out. */
-function useCaptionFont(): void {
+/**
+ * Font guard: loads the caption face plus every diegetic era face (fonts.ts)
+ * and reports ready once they resolve or after FONT_GUARD_MS, whichever comes
+ * first. World canvases (signs, plaques, mural) are painted when the 3D stage
+ * mounts, so the stage waits for `ready`; offline renders fall back to the
+ * same-character system stacks instead of hanging.
+ */
+function useFontGuard(): boolean {
   const { delayRender, continueRender } = useDelayRender();
-  const [handle] = useState(() => delayRender('Loading caption font', { timeoutInMilliseconds: 10000 }));
+  const [handle] = useState(() => delayRender('Loading caption + diegetic fonts', { timeoutInMilliseconds: 10000 }));
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     let resolved = false;
     const done = (): void => {
       if (!resolved) {
         resolved = true;
-        continueRender(handle);
+        setReady(true);
       }
     };
-    const timer = setTimeout(done, FONT_TIMEOUT_MS);
+    const timer = setTimeout(done, FONT_GUARD_MS);
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = FONT_CSS;
+    link.href = DIEGETIC_FONT_CSS;
     link.onload = () => {
       if (document.fonts && document.fonts.load) {
-        Promise.all([document.fonts.load(`800 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`), document.fonts.load('600 40px "Plus Jakarta Sans"')]).then(done, done);
+        const faces = [`800 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`, ...DIEGETIC_FONT_FACES];
+        Promise.all(faces.map((f) => document.fonts.load(f))).then(done, done);
       } else {
         done();
       }
@@ -323,7 +329,12 @@ function useCaptionFont(): void {
     link.onerror = done;
     document.head.appendChild(link);
     return () => clearTimeout(timer);
-  }, [handle, continueRender]);
+  }, []);
+  // Release the render only after the stage has mounted with the fonts in place.
+  useEffect(() => {
+    if (ready) continueRender(handle);
+  }, [ready, handle, continueRender]);
+  return ready;
 }
 
 const Word: React.FC<{ word: WordTiming; active: boolean; spoken: boolean; frame: number }> = ({ word, active, spoken, frame }) => {
@@ -350,8 +361,9 @@ const Captions: React.FC<{ pages: readonly CaptionPage[]; words: readonly WordTi
   const page = captionPageAt(pages, frame);
   if (!page || frame < HOOK.outEnd - 6) return null;
   const active = words[activeWordIndex(words, frame)];
-  const enter = smoothstep(page.startFrame - 1, page.startFrame + 5, frame);
-  const exit = 1 - smoothstep(page.endFrame - 4, page.endFrame, frame);
+  // Crisp 2-frame in/out: long fades read as a translucent, blurry caption mid-sentence.
+  const enter = smoothstep(page.startFrame - 1, page.startFrame + 1, frame);
+  const exit = 1 - smoothstep(page.endFrame - 2, page.endFrame, frame);
   return (
     <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: CAPTION_FRAMING.bottom, pointerEvents: 'none' }}>
       <div
@@ -365,7 +377,7 @@ const Captions: React.FC<{ pages: readonly CaptionPage[]; words: readonly WordTi
           lineHeight: CAPTION_FRAMING.lineHeight,
           letterSpacing: '-0.01em',
           opacity: Math.min(enter, exit),
-          transform: `translateY(${(1 - enter) * 24}px)`,
+          transform: `translateY(${(1 - enter) * 10}px)`,
         }}
       >
         {page.lines.map((line, li) => (
@@ -514,15 +526,17 @@ const HookTitle: React.FC = () => {
 
 export const Cikajang: React.FC<CikajangProps> = ({ words, sentences }) => {
   const { width, height } = useVideoConfig();
-  useCaptionFont();
+  const fontsReady = useFontGuard();
   const pages = useMemo(() => buildCaptionPages(words, sentences), [words, sentences]);
   return (
     <AbsoluteFill style={{ backgroundColor: '#14101e' }}>
-      <ThreeCanvas width={width} height={height} shadows="percentage" flat dpr={1} camera={{ fov: 40, near: 0.05, far: 400, position: [0, 1.5, 5] }} gl={{ antialias: false, preserveDrawingBuffer: true }}>
-        <CikajangScene />
-      </ThreeCanvas>
+      {fontsReady ? (
+        <ThreeCanvas width={width} height={height} shadows="percentage" flat dpr={1} camera={{ fov: 40, near: 0.05, far: 400, position: [0, 1.5, 5] }} gl={{ antialias: false, preserveDrawingBuffer: true }}>
+          <CikajangScene />
+        </ThreeCanvas>
+      ) : null}
       {/* Bottom scrim keeps captions legible over bright scenes. */}
-      <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(10,8,20,0.72) 0%, rgba(10,8,20,0) 34%)', pointerEvents: 'none' }} />
+      <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(10,8,20,0.82) 0%, rgba(10,8,20,0.55) 14%, rgba(10,8,20,0) 36%)', pointerEvents: 'none' }} />
       <HookTitle />
       <ShotChip />
       <Captions pages={pages} words={words} />
