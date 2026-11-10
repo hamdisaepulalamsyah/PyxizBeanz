@@ -133,7 +133,64 @@ export type HandProp = 'none' | 'pen' | 'chalk' | 'whistle' | 'signalLamp' | 'ha
 /** Larger props carried by the body and gripped by the hands. */
 export type BodyProp = 'none' | 'backpack' | 'shoulderBasket' | 'lapSack' | 'lapBakul' | 'lapBoard' | 'newspaper' | 'deskNotebook';
 
-export type Expression = 'neutral' | 'warm' | 'serious' | 'thinking' | 'sad' | 'wonder';
+export type Expression = 'neutral' | 'warm' | 'serious' | 'thinking' | 'sad' | 'wonder' | 'smirk' | 'shock' | 'laugh';
+
+/** Frames an expression swap takes: snappy, never a slow morph (skill v2.2 §3). */
+export const EXPRESSION_SNAP_FRAMES = 2;
+
+// ── Color script (skill v2.2 §5.4): lighting narrates the story ─────────────
+
+export type ColorPhase = 'goldenDusk' | 'mountainMorning' | 'colonialWarm' | 'crisisCold' | 'closureGrey' | 'todayBright' | 'climaxGold';
+
+export interface ColorScriptEntry {
+  /** What the phase means in the story. */
+  mood: string;
+  /** Key light colour (sun / lamp). */
+  key: string;
+  /** Shadow colour — indigo / lavender / amber, never dead grey. */
+  shadow: string;
+  /** Rim-light tint painted on character cards (follows the key). */
+  rim: string;
+  /** Rim strength 0..1 on the character cards. */
+  rimStrength: number;
+  /** Emissive glow tint for hero props (lanterns, carved letters). */
+  glow: string;
+  /** Atmosphere: fog / haze tint. */
+  haze: string;
+}
+
+/**
+ * Phase → shots: goldenDusk 1 · mountainMorning 2–3 · colonialWarm 4–7 (heyday, sepia) ·
+ * crisisCold 8 · closureGrey 9 · todayBright 10–12 · climaxGold 13 (twilight, carving glows).
+ * Rim light on the cast cards and the world lighting rigs follow these entries.
+ */
+export const COLOR_SCRIPT: Readonly<Record<ColorPhase, ColorScriptEntry>> = {
+  goldenDusk: { mood: 'Pembuka / harapan — senja emas di pintu tua', key: '#ffa550', shadow: '#2c1f4a', rim: '#ffc27a', rimStrength: 0.85, glow: '#ffd27a', haze: '#e8a070' },
+  mountainMorning: { mood: 'Pagi pegunungan berkicau, embun & kabut berlapis', key: '#fff1d6', shadow: '#4a5a8a', rim: '#fff4e0', rimStrength: 0.55, glow: '#fff0c8', haze: '#c8d8e4' },
+  colonialWarm: { mood: 'Kejayaan 1930-an — amber hangat, debu berkilau', key: '#ffcf8a', shadow: '#4a2f3a', rim: '#ffd59a', rimStrength: 0.7, glow: '#ffc060', haze: '#d8b080' },
+  crisisCold: { mood: 'Krisis 1980-an — neon dingin, sorot sempit', key: '#d8e4d0', shadow: '#2a3050', rim: '#a8c4e0', rimStrength: 0.5, glow: '#e4ecd4', haze: '#7a8478' },
+  closureGrey: { mood: 'Penutupan 1982 — kelabu biru-ungu', key: '#c8cce0', shadow: '#3a3458', rim: '#9aa4d0', rimStrength: 0.45, glow: '#b8b0d8', haze: '#8a8aa0' },
+  todayBright: { mood: 'Masa kini — cerah segar, langit biru', key: '#fff6e4', shadow: '#3c4a7a', rim: '#ffffff', rimStrength: 0.6, glow: '#fff4d8', haze: '#cfe2f0' },
+  climaxGold: { mood: 'Klimaks — twilight emas kontras tinggi, ukiran menyala', key: '#ff9a40', shadow: '#24183e', rim: '#ffb860', rimStrength: 1, glow: '#ffcc66', haze: '#d88a60' },
+};
+
+// ── Cartoon FX cues (skill v2.2 §4.3) ───────────────────────────────────────
+
+export type FxKind = 'sweat' | 'speedLines' | 'spark' | 'question' | 'exclaim' | 'zzz';
+
+export interface FxCue {
+  kind: FxKind;
+  /** Shot progress (0..1) at which the effect pops in. */
+  at: number;
+  /** Lifetime in frames. */
+  frames: number;
+  /** Cast index the effect sticks to (head-relative); omit for screen FX / `pos`. */
+  cast?: number;
+  /** Fixed world position when not attached to a cast member. */
+  pos?: Vec3;
+  /** Size multiplier (default 1). */
+  size?: number;
+}
 
 export interface CameraKey {
   t: number;
@@ -181,8 +238,12 @@ export interface Shot {
   /** Exclusive end frame. */
   to: number;
   world: WorldId;
-  /** Transition into this shot. */
-  cut: 'dip' | 'hard' | 'flash';
+  /** Transition into this shot. `xfade` = XFADE_FRAMES soft cross-dissolve. */
+  cut: 'dip' | 'hard' | 'flash' | 'xfade';
+  /** Color-script phase (COLOR_SCRIPT) — drives rim light on the cast. */
+  phase: ColorPhase;
+  /** Cartoon 2D FX on key story beats only. */
+  fx?: readonly FxCue[];
   chip: Keys<{ place: string; year: string }>;
   camera: readonly CameraKey[];
   /** Bokeh strength keys (0 = sharp, 1 = very shallow). */
@@ -205,6 +266,22 @@ const SEPIA: Grade = { sepia: [[0, 0.92]] };
 /** Present-day lead: denim jacket, hijab, backpack, sneakers. */
 const dinda = (m: Omit<CastMember, 'actor' | 'scale'> & { scale?: number }): CastMember => ({ actor: 'dinda', scale: 1.25, bodyProp: 'backpack', ...m });
 
+// ── Beat helper ─────────────────────────────────────────────────────────────
+
+/** Shot boundaries (frames) — `from` of each shot plus the end of the film. */
+const SHOT_EDGES = [0, 240, 540, 840, 1140, 1410, 1680, 1980, 2280, 2580, 2850, 3120, 3390, 3640] as const;
+
+/**
+ * Shot progress of an absolute film frame inside shot `n` (1-based), so expression
+ * and FX keys are written against `words.json` frames (round(sec × 30)) and sit
+ * 0–3 frames BEFORE the narrated keyword.
+ */
+function beat(n: number, frame: number): number {
+  const a = SHOT_EDGES[n - 1] ?? 0;
+  const b = SHOT_EDGES[n] ?? a + 1;
+  return Math.round(clamp01((frame - a) / (b - a - 1)) * 10000) / 10000;
+}
+
 export const SHOTS: readonly Shot[] = [
   // 1 — Rear door at golden dusk: Dinda traces the carved "1930 – 1982".
   {
@@ -213,24 +290,39 @@ export const SHOTS: readonly Shot[] = [
     to: 240,
     world: 'stationRear',
     cut: 'hard',
+    phase: 'goldenDusk',
     chip: [[0, { place: 'STASIUN CIKAJANG', year: 'KINI' }]],
-    aperture: [[0, 0.6], [0.5, 0.5], [1, 0.45]],
-    // 3/4 medium shot from the right: Dinda's head, hijab, backpack and the arm reaching
-    // from her shoulder to the carving all stay in frame, then a slow dolly-out.
+    aperture: [[0, 0.7], [0.1, 0.62], [0.3, 0.5], [1, 0.45]],
+    // MACRO HOOK (0–1 s): extreme close-up of the carved "1930 – 1982" (plaque centre sits ~57 % down the
+    // frame, below the title overlay) with Dinda's mitten resting on the plaque's lower edge, never on the
+    // digits; impact slam at HOOK.impactFrame, then a smootherstep pull-back to a medium shot of Dinda,
+    // a push-in on the dates while they are read, and a slow dolly-out. Shot size changes every ~2–3 s.
     camera: [
-      { t: 0, pos: [0.42, 1.3, 2.4], target: [-0.02, 1.1, -0.8], fov: 38 },
-      { t: 0.45, pos: [0.55, 1.38, 3.1], target: [0.06, 1.1, -0.8], fov: 38 },
-      { t: 1, pos: [0.62, 1.5, 4.8], target: [0.2, 1.08, -0.8], fov: 38 },
+      { t: 0, pos: [0.34, 1.26, 2.35], target: [-0.1, 1.2, -0.88], fov: 30 },
+      { t: 0.075, pos: [0.35, 1.27, 2.4], target: [-0.1, 1.2, -0.88], fov: 30 },
+      { t: 0.27, pos: [0.6, 1.4, 3.6], target: [0.15, 1.15, -0.8], fov: 36 },
+      { t: 0.42, pos: [0.3, 1.3, 3.0], target: [-0.08, 1.14, -0.85], fov: 30 },
+      { t: 0.72, pos: [0.55, 1.4, 3.9], target: [0.15, 1.12, -0.8], fov: 36 },
+      { t: 1, pos: [0.7, 1.5, 4.8], target: [0.3, 1.08, -0.8], fov: 38 },
+    ],
+    // Glint on the plaque's top corner right after the cut, speed lines on the slam.
+    fx: [
+      { kind: 'spark', at: 0.02, frames: 16, pos: [0.18, 1.3, -0.8], size: 0.6 },
+      { kind: 'speedLines', at: beat(1, HOOK.impactFrame), frames: 10 },
     ],
     grade: { sepia: [[0, 0]], tone: 0.6 },
     cast: [
       dinda({
         anchor: 'dindaTrace',
         pose: 'stand',
-        expression: [[0, 'thinking'], [0.6, 'wonder']],
-        right: [[0, 'trace']],
+        // "terukir dua angka" (56) → wonder; "1982." (176) → serious.
+        expression: [[0, 'thinking'], [beat(1, 54), 'wonder'], [beat(1, 174), 'serious']],
+        // Hand traces BELOW the carving (traceLow) so the digits stay 100 % free; Dinda is nudged right so
+        // her torso stays off the plaque.
+        right: [[0, 'traceLow']],
         left: [[0, 'strap'], [0.72, 'strap'], [0.82, 'palm']],
         turn: [[0, -0.55], [0.55, -0.45], [0.85, 0]],
+        move: [[0, [0.2, 0, 0]]],
       }),
     ],
   },
@@ -241,11 +333,23 @@ export const SHOTS: readonly Shot[] = [
     to: 540,
     world: 'platformMist',
     cut: 'dip',
+    phase: 'mountainMorning',
     chip: [[0, { place: 'PERON CIKAJANG', year: '1.246 MDPL' }]],
-    aperture: [[0, 0.55], [0.7, 0.4], [1, 0.25]],
+    // Rack focus: opens on the soft foreground leaves (bokeh up), snaps to Dinda by ~0.9 s, then follows the crane.
+    aperture: [[0, 0.85], [0.1, 0.8], [0.18, 0.55], [0.7, 0.4], [1, 0.25]],
+    focus: [
+      [0, [0.5, 2.3, 0.69]],
+      [0.07, [0.5, 2.3, 0.69]],
+      [0.17, [0, 1.6, -1.5]],
+      [0.45, [-0.6, 1.6, -1.6]],
+      [0.75, [-0.4, 3.6, -12]],
+      [1, [0, 9.5, -60]],
+    ],
+    // MCU on Dinda → low angle up at the elevation sign → crane up to the slopes.
     camera: [
       { t: 0, pos: [0.5, 1.45, 3.6], target: [-0.3, 1.45, -1.6], fov: 40 },
-      { t: 0.45, pos: [0.2, 1.6, 3.9], target: [-0.6, 1.6, -1.6], fov: 40 },
+      { t: 0.3, pos: [0.3, 1.0, 3.7], target: [-0.45, 2.1, -1.7], fov: 42 },
+      { t: 0.5, pos: [0.2, 1.6, 3.9], target: [-0.6, 1.6, -1.6], fov: 40 },
       { t: 0.75, pos: [0.0, 3.4, 5.2], target: [-0.4, 3.6, -12], fov: 42 },
       { t: 1, pos: [0.0, 6.6, 6.2], target: [0, 9.5, -60], fov: 44 },
     ],
@@ -254,7 +358,8 @@ export const SHOTS: readonly Shot[] = [
       dinda({
         anchor: 'dinda',
         pose: 'stand',
-        expression: [[0, 'neutral'], [0.15, 'warm']],
+        // "tertinggi" (413) → wonder; "Apa yang terjadi" (470) → thinking.
+        expression: [[0, 'neutral'], [0.15, 'warm'], [beat(2, 411), 'wonder'], [beat(2, 468), 'thinking']],
         right: [[0, 'side'], [0.16, 'pointHigh'], [0.52, 'pointHigh'], [0.62, 'palm'], [0.8, 'palm'], [0.9, 'side']],
         left: [[0, 'strap']],
         turn: [[0, -0.6], [0.12, 0]],
@@ -270,8 +375,18 @@ export const SHOTS: readonly Shot[] = [
     to: 840,
     world: 'ladang',
     cut: 'flash',
+    phase: 'mountainMorning',
     chip: [[0, { place: 'LERENG CIKAJANG', year: '1930-AN' }]],
-    aperture: [[0, 0.5]],
+    // Rack focus: foreground leaves (bokeh up) → the cabbage rows / farmers, then follows the pan.
+    aperture: [[0, 0.9], [0.08, 0.85], [0.17, 0.6], [0.34, 0.5]],
+    focus: [
+      [0, [-3.45, 1.5, 0.7]],
+      [0.06, [-3.45, 1.5, 0.7]],
+      [0.17, [-4.1, 1.05, 0.35]],
+      [0.3, [-3.6, 1.0, 0.3]],
+      [0.58, [-1.0, 0.95, -1.45]],
+      [1, [9.4, 0.4, -6]],
+    ],
     camera: [
       { t: 0, pos: [-3.7, 1.45, 3.2], target: [-4.1, 1.05, 0.35], fov: 38 },
       { t: 0.3, pos: [-3.3, 1.45, 3.3], target: [-3.6, 1.0, 0.3], fov: 38 },
@@ -297,7 +412,8 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'petani2',
         scale: 1.1,
         pose: 'stand',
-        expression: [[0, 'neutral']],
+        // "hasil bumi:" (679) → wonder.
+        expression: [[0, 'neutral'], [beat(3, 677), 'wonder']],
         right: [[0, 'knee'], [0.52, 'traceLow'], [0.62, 'traceLow'], [0.68, 'knee']],
         left: [[0, 'knee']],
         turn: [[0, -0.4]],
@@ -311,6 +427,7 @@ export const SHOTS: readonly Shot[] = [
     to: 1140,
     world: 'office1930',
     cut: 'dip',
+    phase: 'colonialWarm',
     chip: [[0, { place: 'KANTOR STASIUN', year: '31 JULI 1930' }]],
     aperture: [[0, 0.55], [0.7, 0.7], [1, 0.9]],
     camera: [
@@ -327,7 +444,8 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'desk',
         scale: 1.15,
         pose: 'sit',
-        expression: [[0, 'serious'], [0.5, 'thinking']],
+        // "jalur baru dibuka" (1100) → warm.
+        expression: [[0, 'serious'], [0.5, 'thinking'], [beat(4, 1098), 'warm']],
         right: [[0, 'write']],
         left: [[0, 'pressPage']],
         rightProp: 'pen',
@@ -339,7 +457,8 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'corner',
         scale: 1.15,
         pose: 'sit',
-        expression: [[0, 'thinking'], [0.5, 'wonder']],
+        // "mencatat" (1060) → wonder; "baru dibuka" (1091) → smirk.
+        expression: [[0, 'thinking'], [beat(4, 1058), 'wonder'], [beat(4, 1089), 'smirk']],
         right: [[0, 'newspaper']],
         left: [[0, 'newspaper']],
         bodyProp: 'newspaper',
@@ -353,15 +472,22 @@ export const SHOTS: readonly Shot[] = [
     to: 1410,
     world: 'cibatu',
     cut: 'dip',
+    phase: 'colonialWarm',
     kicks: [0.2],
     chip: [[0, { place: 'STASIUN CIBATU', year: '06.04' }]],
-    aperture: [[0, 0.5], [0.5, 0.35], [1, 0.4]],
+    aperture: [[0, 0.5], [0.5, 0.35], [0.6, 0.6], [0.72, 0.55], [0.86, 0.4], [1, 0.4]],
+    // High on the 06.04 plate → wide → CUT-AWAY INSERT on the loco's drive wheels / connecting rods as it
+    // starts to roll ("berangkat dari Cibatu", p≈0.6–0.72) → pull out to follow the departing train.
+    // Loco group sits at (-2.4, 0, 0.9) until p 0.58; drive wheels are at x −1.4 / −2.4 / −3.4, y 0.76, z 1.54.
     camera: [
       { t: 0, pos: [0.5, 3.0, 0.7], target: [0.5, 3.25, -2.0], fov: 48 },
-      { t: 0.45, pos: [0.55, 1.85, 6.2], target: [0.5, 2.1, -1.8], fov: 24 },
-      { t: 0.7, pos: [1.6, 1.7, 5.4], target: [2.6, 1.4, -1.0], fov: 34 },
+      { t: 0.5, pos: [0.55, 1.85, 6.2], target: [0.5, 2.1, -1.8], fov: 24 },
+      { t: 0.6, pos: [-1.5, 0.7, 4.3], target: [-2.4, 0.8, 1.2], fov: 34 },
+      { t: 0.72, pos: [-1.7, 0.62, 4.1], target: [-2.3, 0.85, 1.2], fov: 32 },
+      { t: 0.86, pos: [1.6, 1.7, 5.4], target: [2.6, 1.4, -1.0], fov: 34 },
       { t: 1, pos: [4.0, 1.8, 5.4], target: [9.0, 1.4, 0.8], fov: 38 },
     ],
+    focus: [[0, [0.5, 3.25, -2.0]], [0.5, [0.5, 2.1, -1.8]], [0.6, [-2.4, 0.8, 1.54]], [0.72, [-2.3, 0.8, 1.54]], [0.86, [2.6, 1.4, -1.0]], [1, [9.0, 1.4, 0.8]]],
     grade: SEPIA,
     cast: [
       {
@@ -369,7 +495,8 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'kondektur',
         scale: 1.15,
         pose: 'stand',
-        expression: [[0, 'serious']],
+        // "berangkat dari Cibatu" (1313) → proud smirk.
+        expression: [[0, 'serious'], [beat(5, 1311), 'smirk']],
         right: [[0, 'side'], [0.18, 'whistle'], [0.62, 'whistle'], [0.72, 'side']],
         left: [[0, 'lampLow']],
         rightProp: 'whistle',
@@ -387,7 +514,9 @@ export const SHOTS: readonly Shot[] = [
     from: 1410,
     to: 1680,
     world: 'carriage',
-    cut: 'dip',
+    // Same journey, soft space change: platform → carriage cross-dissolve.
+    cut: 'xfade',
+    phase: 'colonialWarm',
     chip: [[0, { place: 'GERBONG KELAS III', year: '08.25' }]],
     aperture: [[0, 0.45]],
     camera: [
@@ -398,10 +527,10 @@ export const SHOTS: readonly Shot[] = [
     cast: [
       { actor: 'bapakPeci', anchor: 'seat1', scale: 1.15, pose: 'sit', expression: [[0, 'thinking']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.5]] },
       { actor: 'petani', anchor: 'seat2', scale: 1.15, pose: 'sit', expression: [[0, 'neutral']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.2]] },
-      { actor: 'ibuBakul', anchor: 'seat3', scale: 1.1, pose: 'sit', expression: [[0, 'warm']], right: [[0, 'basketLap']], left: [[0, 'basketLap']], bodyProp: 'lapBakul', turn: [[0, 0.4]] },
-      { actor: 'anak', anchor: 'seat4', scale: 0.85, pose: 'stand', expression: [[0, 'wonder']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.8]] },
-      { actor: 'penumpangWanita', anchor: 'seat5', scale: 1.1, pose: 'sit', expression: [[0, 'neutral']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.3]] },
-      { actor: 'penumpangPria', anchor: 'seat6', scale: 1.15, pose: 'sit', expression: [[0, 'thinking']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.6]] },
+      { actor: 'ibuBakul', anchor: 'seat3', scale: 1.1, pose: 'sit', expression: [[0, 'warm'], [beat(6, 1528), 'laugh']], right: [[0, 'basketLap']], left: [[0, 'basketLap']], bodyProp: 'lapBakul', turn: [[0, 0.4]] },
+      { actor: 'anak', anchor: 'seat4', scale: 0.85, pose: 'stand', expression: [[0, 'wonder'], [beat(6, 1543), 'laugh']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.8]] },
+      { actor: 'penumpangWanita', anchor: 'seat5', scale: 1.1, pose: 'sit', expression: [[0, 'neutral'], [beat(6, 1599), 'laugh']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.3]] },
+      { actor: 'penumpangPria', anchor: 'seat6', scale: 1.15, pose: 'sit', expression: [[0, 'thinking'], [beat(6, 1639), 'smirk']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.6]] },
     ],
   },
   // 7 — Garut 1935 timetable "5x", whip-pan to 1947 rail repairs.
@@ -411,7 +540,11 @@ export const SHOTS: readonly Shot[] = [
     to: 1980,
     world: 'garut1935',
     cut: 'dip',
+    phase: 'colonialWarm',
     flashes: [0.51],
+    // "lima" (1760): the 5x reveal lands with a kick + speed lines.
+    kicks: [beat(7, 1758)],
+    fx: [{ kind: 'speedLines', at: beat(7, 1758), frames: 12 }],
     chip: [
       [0, { place: 'STASIUN GARUT', year: '1935' }],
       [0.53, { place: 'JALUR CIKAJANG–GARUT', year: '1947' }],
@@ -430,13 +563,15 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'petugas',
         scale: 1.15,
         pose: 'stand',
-        expression: [[0, 'warm'], [0.25, 'serious']],
+        // "lima kali" (1760) → proud smirk, then back to serious.
+        expression: [[0, 'warm'], [beat(7, 1756), 'smirk'], [beat(7, 1800), 'serious']],
         right: [[0, 'side'], [0.1, 'point'], [0.45, 'point']],
         left: [[0, 'hip']],
         turn: [[0, -0.4], [0.25, 0]],
       },
-      { actor: 'pekerjaRel', anchor: 'pekerja1', scale: 1.15, pose: 'stand', expression: [[0, 'serious']], right: [[0, 'hammer']], left: [[0, 'knee']], rightProp: 'hammer', turn: [[0, -0.3]] },
-      { actor: 'pekerjaRel2', anchor: 'pekerja2', scale: 1.15, pose: 'stand', expression: [[0, 'neutral']], right: [[0, 'hammer']], left: [[0, 'hip']], rightProp: 'hammer', turn: [[0, 0.4]] },
+      // "merusak" (1932) → shock; "tahun 1947" (1973) → sad.
+      { actor: 'pekerjaRel', anchor: 'pekerja1', scale: 1.15, pose: 'stand', expression: [[0, 'serious'], [beat(7, 1930), 'shock'], [beat(7, 1971), 'sad']], right: [[0, 'hammer']], left: [[0, 'knee']], rightProp: 'hammer', turn: [[0, -0.3]] },
+      { actor: 'pekerjaRel2', anchor: 'pekerja2', scale: 1.15, pose: 'stand', expression: [[0, 'neutral'], [beat(7, 1931), 'shock'], [beat(7, 1971), 'sad']], right: [[0, 'hammer']], left: [[0, 'hip']], rightProp: 'hammer', turn: [[0, 0.4]] },
     ],
   },
   // 8 — Dim early-1980s office: one chalk draws the falling line; rack focus to the old loco.
@@ -446,18 +581,23 @@ export const SHOTS: readonly Shot[] = [
     to: 2280,
     world: 'office1980',
     cut: 'dip',
+    phase: 'crisisCold',
     roll: [[0, 0], [0.55, 0], [1, -3]],
+    // "terus menurun" (2210): the chart falls — nervous sweat drop on the clerk's temple.
+    fx: [{ kind: 'sweat', at: beat(8, 2208), frames: 26, cast: 0 }],
     chip: [[0, { place: 'KANTOR STASIUN', year: 'AWAL 1980-AN' }]],
-    aperture: [[0, 0.5], [0.55, 0.75], [1, 0.95]],
+    aperture: [[0, 0.5], [0.55, 0.7], [0.78, 0.75], [1, 0.95]],
     camera: [
       { t: 0, pos: [0.7, 1.35, 2.9], target: [0.05, 0.9, -1.0], fov: 38 },
       // Hold on the PJKA plate long enough to read it, then push in: the plate
       // leaves frame during the fast middle of the smootherstep, not a slow crawl.
       { t: 0.16, pos: [0.62, 1.32, 2.62], target: [0.05, 0.92, -1.0], fov: 38 },
-      { t: 0.55, pos: [0.12, 0.98, 0.45], target: [0.02, 0.82, -1.0], fov: 34 },
+      // Close on the clerk + chalk board (head stays in frame for the sweat beat), hold, then pan to the loco.
+      { t: 0.55, pos: [0.12, 1.0, 1.15], target: [0.02, 0.96, -1.0], fov: 35 },
+      { t: 0.78, pos: [0.14, 1.0, 1.1], target: [0.03, 0.96, -1.0], fov: 35 },
       { t: 1, pos: [0.3, 1.05, 0.55], target: [1.2, 1.25, -3.2], fov: 34 },
     ],
-    focus: [[0, [0.05, 0.9, -1.0]], [0.62, [0.02, 0.82, -1.0]], [0.85, [2.4, 1.2, -7.5]]],
+    focus: [[0, [0.05, 0.9, -1.0]], [0.62, [0.02, 0.96, -1.0]], [0.8, [0.02, 0.96, -1.0]], [0.95, [2.4, 1.2, -7.5]]],
     grade: { sepia: [[0, 0.75]] },
     cast: [
       {
@@ -465,7 +605,8 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'chair',
         scale: 1.15,
         pose: 'sit',
-        expression: [[0, 'serious'], [0.5, 'sad']],
+        // "berubah" (2141) → sad; "terus menurun" (2210) → shock (sweat); "makin tua" → sad again.
+        expression: [[0, 'serious'], [beat(8, 2139), 'sad'], [beat(8, 2208), 'shock'], [beat(8, 2250), 'sad']],
         right: [[0, 'chalk']],
         left: [[0, 'holdBoard']],
         rightProp: 'chalk',
@@ -481,7 +622,10 @@ export const SHOTS: readonly Shot[] = [
     to: 2580,
     world: 'garut1982',
     cut: 'dip',
-    kicks: [0.73],
+    phase: 'closureGrey',
+    // "ditutup" (2516): the slam — kick + speed lines.
+    kicks: [beat(9, 2514)],
+    fx: [{ kind: 'speedLines', at: beat(9, 2514), frames: 14 }],
     roll: [[0, 0], [0.62, 0], [0.85, -3.5], [1, -4]],
     chip: [[0, { place: 'STASIUN GARUT', year: '1982' }]],
     aperture: [[0, 0.45]],
@@ -498,12 +642,13 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'petugas',
         scale: 1.15,
         pose: 'stand',
-        expression: [[0, 'serious'], [0.4, 'sad']],
+        // "pendapatan" (2392) → sad; "1982" (2424) → shock; "ditutup" (2516) → sad.
+        expression: [[0, 'serious'], [beat(9, 2390), 'sad'], [beat(9, 2422), 'shock'], [beat(9, 2514), 'sad']],
         left: [[0, 'reachUp'], [0.42, 'reachUp'], [0.52, 'side']],
         right: [[0, 'side']],
         turn: [[0, 0.3], [0.5, 0]],
       },
-      { actor: 'penumpangPria', anchor: 'diam1', scale: 1.15, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, 0.5]] },
+      { actor: 'penumpangPria', anchor: 'diam1', scale: 1.15, pose: 'stand', expression: [[0, 'sad'], [beat(9, 2422), 'shock'], [beat(9, 2470), 'sad']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, 0.5]] },
       { actor: 'ibuBakul', anchor: 'diam2', scale: 1.1, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'pocket']], turn: [[0, 0.6]] },
       { actor: 'bapakPeci', anchor: 'diam3', scale: 1.15, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.4]], nod: [[0, 0.5]] },
     ],
@@ -515,6 +660,7 @@ export const SHOTS: readonly Shot[] = [
     to: 2850,
     world: 'cikajangToday',
     cut: 'flash',
+    phase: 'todayBright',
     chip: [[0, { place: 'STASIUN CIKAJANG', year: 'KINI' }]],
     aperture: [[0, 0.3], [1, 0.45]],
     camera: [
@@ -527,7 +673,8 @@ export const SHOTS: readonly Shot[] = [
       dinda({
         anchor: 'dindaCenter',
         pose: 'stand',
-        expression: [[0, 'wonder'], [0.5, 'warm']],
+        // "Puluhan tahun berlalu" (2701) → thinking; "sepanjang… 50 meter" (2777) → warm.
+        expression: [[0, 'wonder'], [beat(10, 2699), 'thinking'], [beat(10, 2775), 'warm']],
         // Natural asymmetric gesture (open palm + hand on the backpack strap): never a T-pose.
         right: [[0, 'side'], [0.2, 'palm'], [0.62, 'palm'], [0.74, 'hip']],
         left: [[0, 'side'], [0.24, 'strap']],
@@ -542,25 +689,31 @@ export const SHOTS: readonly Shot[] = [
     to: 3120,
     world: 'cikajangToday',
     cut: 'dip',
+    phase: 'todayBright',
     chip: [[0, { place: 'UKIRAN', year: '“STATION TJIKADJANG”' }]],
     aperture: [[0, 0.7], [1, 0.75]],
-    // Wide-enough medium shot: the WHOLE "Station Tjikadjang" carving stays inside 82 % of the frame width
-    // (even after the creeping push-in) with Dinda's hand on it and her shoulder/head, then rack focus to her face.
+    // Payoff: slow 9 s hold. Carving spans x 16.74–18.06 (y 0.99–1.37, z −3.665). Dinda is nudged +0.46 m
+    // so her right hand (wrist = anchor.x − 0.58 m ⇒ x ≈ 18.18) traces the carving's RIGHT frame edge and
+    // never covers a letter. The camera is centred between the carving and Dinda: the WHOLE carving stays
+    // inside 82 % of the frame width (even after the creeping push-in) and Dinda stays fully in frame.
     camera: [
-      { t: 0, pos: [17.62, 1.4, 3.7], target: [17.62, 1.35, -3.6], fov: 38 },
-      { t: 0.5, pos: [17.64, 1.45, 3.5], target: [17.65, 1.4, -3.55], fov: 38 },
-      { t: 1, pos: [17.68, 1.55, 3.3], target: [17.7, 1.5, -3.5], fov: 38 },
+      { t: 0, pos: [17.8, 1.4, 4.6], target: [17.8, 1.35, -3.6], fov: 38 },
+      { t: 0.5, pos: [17.81, 1.45, 4.5], target: [17.82, 1.4, -3.55], fov: 38 },
+      { t: 1, pos: [17.83, 1.5, 4.4], target: [17.85, 1.45, -3.5], fov: 38 },
     ],
-    focus: [[0, [17.75, 1.18, -3.68]], [0.45, [17.75, 1.18, -3.68]], [0.72, [18.3, 1.62, -3.45]]],
+    focus: [[0, [17.75, 1.18, -3.68]], [0.45, [17.75, 1.18, -3.68]], [0.72, [18.73, 1.69, -3.42]]],
     grade: COLOUR,
     cast: [
       dinda({
         anchor: 'dindaTrace',
         pose: 'stand',
-        expression: [[0, 'thinking'], [0.6, 'warm']],
-        right: [[0, 'traceLow']],
+        // "Tjikadjang" (2951) → wonder; "menolak dilupakan" (3020) → defiant smirk.
+        expression: [[0, 'thinking'], [beat(11, 2949), 'wonder'], [beat(11, 3018), 'smirk'], [beat(11, 3070), 'warm']],
+        // Hand slides up/down along the right edge (x ≈ 18.18 m): traceLow y ≈ 1.21 m ↔ trace y ≈ 1.39 m.
+        right: [[0, 'traceLow'], [0.26, 'trace'], [0.5, 'traceLow']],
         left: [[0, 'strap']],
         turn: [[0, -0.55], [0.65, -0.1]],
+        move: [[0, [0.46, 0, 0]]],
       }),
       { actor: 'kucing', anchor: 'kucing', scale: 1.15, pose: 'sit', expression: [[0, 'neutral']] },
     ],
@@ -572,6 +725,9 @@ export const SHOTS: readonly Shot[] = [
     to: 3390,
     world: 'garut2022',
     cut: 'flash',
+    phase: 'todayBright',
+    // "hidup lagi" (3154): the line lives again — exclamation sticker by Dinda.
+    fx: [{ kind: 'exclaim', at: beat(12, 3152), frames: 22, cast: 0 }],
     chip: [[0, { place: 'STASIUN GARUT', year: '2022' }]],
     aperture: [[0, 0.4]],
     camera: [
@@ -585,7 +741,8 @@ export const SHOTS: readonly Shot[] = [
       dinda({
         anchor: 'dinda',
         pose: 'stand',
-        expression: [[0, 'warm'], [0.35, 'neutral'], [0.6, 'warm']],
+        // "hidup lagi" (3154) → laugh; "tapi sampai… belum aktif" (3257) → thinking.
+        expression: [[0, 'warm'], [beat(12, 3152), 'laugh'], [0.35, 'neutral'], [beat(12, 3255), 'thinking'], [beat(12, 3330), 'warm']],
         // Points only while the wide frame holds her shoulder; arm rests during the push-in to the map.
         right: [[0, 'side'], [0.05, 'point'], [0.13, 'point'], [0.2, 'side'], [0.55, 'side'], [0.62, 'palm'], [0.76, 'palm'], [0.85, 'side']],
         left: [[0, 'ticket']],
@@ -594,8 +751,8 @@ export const SHOTS: readonly Shot[] = [
         turn: [[0, -0.4], [0.3, 0]],
       }),
       { actor: 'penumpangModern', anchor: 'p1', scale: 1.15, pose: 'stand', expression: [[0, 'neutral']], right: [[0, 'ticket']], left: [[0, 'side']], rightProp: 'phone', turn: [[0, 0.6]] },
-      { actor: 'penumpangModern2', anchor: 'p2', scale: 1.1, pose: 'stand', expression: [[0, 'warm']], right: [[0, 'side']], left: [[0, 'strap']], bodyProp: 'backpack', turn: [[0, 0.5]] },
-      { actor: 'anakModern', anchor: 'p3', scale: 0.85, pose: 'stand', expression: [[0, 'wonder']], right: [[0, 'wave']], left: [[0, 'side']], turn: [[0, 0.7]] },
+      { actor: 'penumpangModern2', anchor: 'p2', scale: 1.1, pose: 'stand', expression: [[0, 'warm'], [beat(12, 3152), 'laugh']], right: [[0, 'side']], left: [[0, 'strap']], bodyProp: 'backpack', turn: [[0, 0.5]] },
+      { actor: 'anakModern', anchor: 'p3', scale: 0.85, pose: 'stand', expression: [[0, 'wonder'], [beat(12, 3152), 'laugh']], right: [[0, 'wave']], left: [[0, 'side']], turn: [[0, 0.7]] },
     ],
   },
   // 13 — Back to the rear door at dusk: hands in jacket pockets, years glow, "?" appears; dolly zoom.
@@ -605,8 +762,11 @@ export const SHOTS: readonly Shot[] = [
     to: 3640,
     world: 'stationRear',
     cut: 'dip',
+    phase: 'climaxGold',
     kicks: [0.56],
     roll: [[0, 0], [0.5, 0], [1, 3]],
+    // The 3-D "?" already glows on the door, so the closing sticker is a spark beside it ("ketiga?", 3617).
+    fx: [{ kind: 'spark', at: beat(13, 3615), frames: 22, pos: [0.78, 2.1, -0.65], size: 0.9 }],
     chip: [[0, { place: 'STASIUN CIKAJANG', year: '20??' }]],
     aperture: [[0, 0.45], [1, 0.6]],
     camera: [
@@ -618,7 +778,8 @@ export const SHOTS: readonly Shot[] = [
       dinda({
         anchor: 'dindaCenter',
         pose: 'stand',
-        expression: [[0, 'thinking'], [0.55, 'wonder']],
+        // "1982" (3471) → serious; "Akankah" (3553) → wonder; "ada angka ketiga" (3600) → teasing smirk.
+        expression: [[0, 'thinking'], [beat(13, 3469), 'serious'], [beat(13, 3551), 'wonder'], [beat(13, 3598), 'smirk']],
         right: [[0, 'pocket']],
         left: [[0, 'pocket']],
         turn: [[0, -0.3], [0.5, 0], [0.75, 0.05]],
@@ -678,6 +839,40 @@ export function cutDipAt(frame: number): number {
 
 /** 6-frame white flash on era jumps: `flash` cuts plus in-shot `flashes`. */
 export const FLASH_FRAMES = 6;
+
+/** 0.5 s cross-dissolve after the cut for `xfade` shots. */
+export const XFADE_FRAMES = 15;
+
+/**
+ * Cross-dissolve state at `frame`: for XFADE_FRAMES after an `xfade` cut the
+ * outgoing shot's last frame (`prevFrame`) is blended over the incoming shot,
+ * weight 1 → 0 with smoothstep. Otherwise null. Pure function of frame.
+ */
+export function crossfadeAt(frame: number): { prevIndex: number; prevFrame: number; weight: number } | null {
+  for (let i = 1; i < SHOTS.length; i++) {
+    const s = SHOTS[i];
+    if (!s || s.cut !== 'xfade') continue;
+    const d = frame - s.from;
+    if (d >= 0 && d < XFADE_FRAMES) return { prevIndex: i - 1, prevFrame: s.from - 1, weight: 1 - smoothstep(0, XFADE_FRAMES, d + 0.5) };
+  }
+  return null;
+}
+
+/** Index of the expression key active at `progress` and frames since it began (blink on swap). */
+export function snapKeys<T>(keys: Keys<T> | undefined, fallback: T, progress: number, shotLen: number): { from: T; to: T; mix: number; age: number } {
+  const first = keys?.[0];
+  if (!keys || !first) return { from: fallback, to: fallback, mix: 0, age: 1e6 };
+  let prev = first[1];
+  let cur = first;
+  for (let i = 1; i < keys.length; i++) {
+    const k = keys[i];
+    if (!k || progress < k[0]) break;
+    prev = cur[1];
+    cur = k;
+  }
+  const age = cur === first ? 1e6 : (progress - cur[0]) * shotLen;
+  return { from: prev, to: cur[1], mix: clamp01(age / EXPRESSION_SNAP_FRAMES), age };
+}
 
 export function cutFlashAt(frame: number): number {
   let f = 0;

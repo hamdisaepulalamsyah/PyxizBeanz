@@ -46,6 +46,10 @@ const OUTLINE = 11;
 const HIP_Y = SOLE - HEAD_H_PX * 1.35;
 const TORSO_TOP = HIP_Y - HEAD_H_PX * 1.1;
 const HEAD_CY = TORSO_TOP - HEAD_HALF_H * HEAD_SCALE + 8;
+/** Head centre height above the sole and head half-height, in metres at scale 1 (FX anchors). */
+export const HEAD_CENTER_M = (SOLE - HEAD_CY) / PX;
+export const HEAD_HALF_H_M = (HEAD_HALF_H * HEAD_SCALE) / PX;
+export const HEAD_HALF_W_M = (HEAD_HALF_W * HEAD_SCALE) / PX;
 /** Seated hip line (thighs foreshortened toward camera). */
 const SEAT_Y = HIP_Y + 40;
 /** Desk line on the card for seated writing poses. */
@@ -167,17 +171,40 @@ interface FacePreset {
   smile: number;
   bow: number;
   lookY: number;
-  /** Small "o" mouth (wonder). */
+  /** Small "o" mouth (wonder) / tall oval (shock). */
   open: number;
+  /** One-sided smile: right mouth corner up, left flat (smirk). */
+  smirk: number;
+  /** Constant eye-direction bias (−1 left … +1 right), added to the turn-driven look. */
+  lookBias: number;
+  /** Eyes wide open: bigger whites (shock). */
+  wide: number;
+  /** Pupil size multiplier (1 = normal, small = shock). */
+  pupil: number;
+  /** 0..1 closed happy arcs ^ ^ (laugh). */
+  happy: number;
+  /** 0..1 wide laughing mouth with a tongue. */
+  gape: number;
+  /** 0..1 head pulled back / up (shock). */
+  pull: number;
 }
 
+const FACE_DEFAULTS = { smirk: 0, lookBias: 0, wide: 0, pupil: 1, happy: 0, gape: 0, pull: 0 };
+const face = (p: Pick<FacePreset, 'lid' | 'browRaise' | 'browInner' | 'browAsym' | 'smile' | 'bow' | 'lookY' | 'open'> & Partial<FacePreset>): FacePreset => ({ ...FACE_DEFAULTS, ...p });
+
 const PRESETS: Record<Expression, FacePreset> = {
-  neutral: { lid: 0.28, browRaise: 0.1, browInner: 0, browAsym: 0, smile: 0.15, bow: 0, lookY: 0, open: 0 },
-  warm: { lid: 0.2, browRaise: 0.35, browInner: 0.1, browAsym: 0, smile: 0.7, bow: 0, lookY: 0, open: 0 },
-  serious: { lid: 0.36, browRaise: 0, browInner: -0.85, browAsym: 0, smile: -0.2, bow: 0.05, lookY: 0, open: 0 },
-  thinking: { lid: 0.3, browRaise: 0.35, browInner: 0.1, browAsym: 0.7, smile: -0.06, bow: 0, lookY: -0.6, open: 0 },
-  sad: { lid: 0.46, browRaise: 0.12, browInner: 0.85, browAsym: 0, smile: -0.45, bow: 0.25, lookY: 0.5, open: 0 },
-  wonder: { lid: 0.06, browRaise: 0.8, browInner: 0.3, browAsym: 0, smile: 0.25, bow: 0, lookY: -0.3, open: 0.32 },
+  neutral: face({ lid: 0.28, browRaise: 0.1, browInner: 0, browAsym: 0, smile: 0.15, bow: 0, lookY: 0, open: 0 }),
+  warm: face({ lid: 0.2, browRaise: 0.35, browInner: 0.1, browAsym: 0, smile: 0.7, bow: 0, lookY: 0, open: 0 }),
+  serious: face({ lid: 0.36, browRaise: 0, browInner: -0.85, browAsym: 0, smile: -0.2, bow: 0.05, lookY: 0, open: 0 }),
+  thinking: face({ lid: 0.3, browRaise: 0.35, browInner: 0.1, browAsym: 0.7, smile: -0.06, bow: 0, lookY: -0.6, open: 0 }),
+  sad: face({ lid: 0.46, browRaise: 0.12, browInner: 0.85, browAsym: 0, smile: -0.45, bow: 0.25, lookY: 0.5, open: 0 }),
+  wonder: face({ lid: 0.06, browRaise: 0.8, browInner: 0.3, browAsym: 0, smile: 0.25, bow: 0, lookY: -0.3, open: 0.32 }),
+  // Sly sideways glance: half-lidded, one brow cocked, one-sided grin.
+  smirk: face({ lid: 0.44, browRaise: 0.12, browInner: -0.25, browAsym: 1.1, smile: 0.4, bow: 0, lookY: 0.05, open: 0, smirk: 1, lookBias: 0.85 }),
+  // Startled: huge eyes with pin-prick pupils, brows high, tall oval mouth, head yanked back.
+  shock: face({ lid: 0, browRaise: 1, browInner: 0.45, browAsym: 0, smile: 0, bow: 0, lookY: -0.1, open: 0.95, wide: 0.3, pupil: 0.55, pull: 1 }),
+  // Belly laugh: eyes squeezed into happy arcs, big open mouth with tongue.
+  laugh: face({ lid: 0.2, browRaise: 0.7, browInner: 0.2, browAsym: 0, smile: 0.9, bow: 0, lookY: 0, open: 0, happy: 1, gape: 1 }),
 };
 
 function blinkShape(d: number): number {
@@ -225,6 +252,13 @@ export interface ToonDrive {
   walkDir: number;
   /** 0..1 progress of the chalk line on the lap board. */
   drawProgress: number;
+  /** Frames since the current expression key began (snappy swap + blink); large = settled. */
+  expressionAge?: number;
+  /**
+   * Scene light for the card (color script): rim tint + strength, and which
+   * screen side the key light comes from (−1 = left, +1 = right).
+   */
+  light?: { rim: string; rimStrength: number; side: number };
 }
 
 export interface ActorSetup {
@@ -246,13 +280,23 @@ interface Pose extends FacePreset {
   shiftRot: number;
   bob: number;
   frame: number;
+  /** Head micro-offsets (px) for expression jolts, shock pull-back and laugh bob. */
+  headDx: number;
+  headDy: number;
 }
 
 function poseFor(d: ToonDrive, seed: number): Pose {
   const a = PRESETS[d.expression.from];
   const b = PRESETS[d.expression.to];
+  // The caller already ramps `mix` over ~2 frames at the key, so no extra smoothing here: swaps stay crisp.
   const mk = (k: keyof FacePreset): number => lerp(a[k], b[k], d.expression.mix);
   const f = d.frame;
+  // Swap beat: forced blink (half / shut / shut / half) + a tiny head jolt that decays over 5 frames.
+  const age = d.expressionAge ?? 1e6;
+  const swapBlink = age >= 0 && age < 4 ? [0.5, 1, 1, 0.5][Math.floor(age)] ?? 0 : 0;
+  const jolt = age >= 0 && age < 5 ? 1 - age / 5 : 0;
+  const joltSign = hash01(seed + 3, f - Math.max(0, Math.min(age, 1e5))) > 0.5 ? 1 : -1;
+  const laughAmt = lerp(d.expression.from === 'laugh' ? 1 : 0, d.expression.to === 'laugh' ? 1 : 0, d.expression.mix);
   const s = f / 30;
   const sway = Math.sin(s * 0.8 + seed) * 0.04 + Math.sin(s * 2.1 + seed * 2) * 0.015;
   const turn = d.turn + sway;
@@ -270,12 +314,19 @@ function poseFor(d: ToonDrive, seed: number): Pose {
     browAsym: mk('browAsym'),
     smile: mk('smile'),
     open: mk('open'),
+    smirk: mk('smirk'),
+    lookBias: mk('lookBias'),
+    wide: mk('wide'),
+    pupil: mk('pupil'),
+    happy: mk('happy'),
+    gape: mk('gape'),
+    pull: mk('pull'),
     bow,
     lookY: clamp01(mk('lookY') * 0.5 + 0.5 + bow * 0.25) * 2 - 1,
     turn,
-    tilt: turn * 0.07 + Math.sin(s * 0.6 + seed) * 0.02 - shiftRot * 0.6,
-    lookX: Math.max(-1, Math.min(1, turn * 1.7 + saccade)),
-    blink: blinkAt(f, seed),
+    tilt: turn * 0.07 + Math.sin(s * 0.6 + seed) * 0.02 - shiftRot * 0.6 + jolt * joltSign * 0.0175 + laughAmt * Math.sin(f * 0.45) * 0.022,
+    lookX: Math.max(-1, Math.min(1, turn * 1.7 + saccade * (1 - 0.8 * Math.abs(mk('lookBias'))) + mk('lookBias'))),
+    blink: Math.max(blinkAt(f, seed), swapBlink),
     breath: -(breathOpen - 0.5) * 7,
     breathOpen,
     breathHead: -(inhale(bp - 0.5) - 0.5) * 5,
@@ -283,6 +334,8 @@ function poseFor(d: ToonDrive, seed: number): Pose {
     shiftRot,
     bob: d.walkPhase === null ? 0 : Math.cos(d.walkPhase * 2) * 3.5,
     frame: f,
+    headDx: jolt * joltSign * 2,
+    headDy: -jolt * 2.5 - mk('pull') * 5 + laughAmt * Math.sin(f * 0.9) * 2.5,
   };
 }
 
@@ -311,10 +364,109 @@ function filled(ctx: CanvasRenderingContext2D, path: () => void, fill: string, l
   strokeOutline(ctx, line);
 }
 
-/** The Persis bean head: superellipse with a softly pointed crown, centred on (0, 0). */
-function traceBeanHead(ctx: CanvasRenderingContext2D, scale = 1): void {
-  const segments = 120;
+// ── Scene light: variable-weight ink, crescent shade, rim light ─────────────
+
+interface CardLight {
+  rim: string;
+  rimStrength: number;
+  /** −1 = key light from screen-left, +1 = from screen-right. */
+  side: number;
+}
+
+const DEFAULT_LIGHT: CardLight = { rim: '#ffe2b0', rimStrength: 0.6, side: 1 };
+/** Set once per card paint (paintHuman); every ink/shade helper reads it. */
+let LIGHT: CardLight = DEFAULT_LIGHT;
+/** Which way the light comes from (never 0). */
+const lightSide = (): 1 | -1 => (LIGHT.side < 0 ? -1 : 1);
+
+function hexA(hex: string, a: number): string {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/** Thin-to-thick ink weights: lit crown/top vs shadow side / underside. */
+const INK_LIT = 0.75;
+const INK_SHADOW = 1.35;
+
+/**
+ * Variable-weight ink: the silhouette is stroked at the thin weight (0.75×), then stroked
+ * again from a copy offset toward the shadow side and downward. The union of the two strokes
+ * has half-width 0.75·h + max(0, offset · normal), so the line swells smoothly (cosine of the
+ * edge normal) to ≈ 1.35× at the lower shadow side and stays 0.75× on the lit crown: no clips,
+ * no seams, round joins, and it scales with `inkMul` like every other line. `trace` must
+ * begin its own path.
+ */
+function inkVar(ctx: CanvasRenderingContext2D, trace: () => void, width = OUTLINE): void {
+  const h = (width * inkMul) / 2;
+  const m = h * (INK_SHADOW - INK_LIT);
+  const s = lightSide();
+  ctx.strokeStyle = PLUM;
+  ctx.lineWidth = h * 2 * INK_LIT;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  trace();
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(-s * 0.6 * m, 0.8 * m);
+  trace();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** `filled` with variable-weight ink. */
+function filledVar(ctx: CanvasRenderingContext2D, path: () => void, fill: string, line = 8): void {
   ctx.beginPath();
+  path();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  inkVar(ctx, () => {
+    ctx.beginPath();
+    path();
+  }, line);
+}
+
+/**
+ * Fill the part of a silhouette that a copy of itself shifted by (dx, dy) does not cover — a
+ * moon crescent hugging one edge. `shape(begin)` traces the silhouette (begin = false appends
+ * to the current path); `clip` optionally replaces the clip region (even-odd), e.g. a hijab band.
+ */
+function crescent(ctx: CanvasRenderingContext2D, shape: (begin: boolean) => void, dx: number, dy: number, fill: string, clip?: () => void): void {
+  ctx.save();
+  if (clip) clip();
+  else shape(true);
+  ctx.clip('evenodd');
+  ctx.beginPath();
+  ctx.rect(-3000, -3000, 6000, 6000);
+  ctx.save();
+  ctx.translate(dx, dy);
+  shape(false);
+  ctx.restore();
+  ctx.fillStyle = fill;
+  ctx.fill('evenodd');
+  ctx.restore();
+}
+
+/** Soft crescent shade on the side away from the light, built from a few stepped layers. */
+function shadeCrescent(ctx: CanvasRenderingContext2D, shape: (begin: boolean) => void, step: number, fill: string, alpha: number, clip?: () => void): void {
+  const s = lightSide();
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  for (let k = 1; k <= 3; k++) crescent(ctx, shape, s * step * k, -step * 0.35 * k, fill, clip);
+  ctx.restore();
+}
+
+/** Thin rim highlight on the lit edge, tinted by the scene light. */
+function rimLight(ctx: CanvasRenderingContext2D, shape: (begin: boolean) => void, thick: number, strength = 1, clip?: () => void): void {
+  const s = lightSide();
+  crescent(ctx, shape, -s * thick, thick * 0.7, hexA(LIGHT.rim, Math.min(1, LIGHT.rimStrength * strength)), clip);
+}
+
+/** The Persis bean head: superellipse with a softly pointed crown, centred on (0, 0). */
+function traceBeanHead(ctx: CanvasRenderingContext2D, scale = 1, begin = true): void {
+  const segments = 120;
+  if (begin) ctx.beginPath();
   for (let i = 0; i <= segments; i++) {
     const th = (i / segments) * Math.PI * 2;
     const c = Math.cos(th);
@@ -397,8 +549,8 @@ function frameFor(pose: Pose, body: BodyPose, walkPhase: number | null, walkDir 
     top: TORSO_TOP + seat + bob + pose.breath * 0.5 + pose.bow * 3,
     hipY: HIP_Y + seat + bob,
     breathScale: 1 + pose.breathOpen * 0.02,
-    headX: HEAD_CX + pose.turn * 6,
-    headY: HEAD_CY + seat + bob + pose.breathHead * 0.6 + pose.bow * 10,
+    headX: HEAD_CX + pose.turn * 6 + pose.headDx,
+    headY: HEAD_CY + seat + bob + pose.breathHead * 0.6 + pose.bow * 10 + pose.headDy,
     lift: [at(0, 'lift') * SWING_LIFT, at(1, 'lift') * SWING_LIFT],
     stride: [at(0, 'x') * STRIDE_AMP * dir, at(1, 'x') * STRIDE_AMP * dir],
     pitch: [at(0, 'pitch'), at(1, 'pitch')],
@@ -408,12 +560,12 @@ function frameFor(pose: Pose, body: BodyPose, walkPhase: number | null, walkDir 
   };
 }
 
-function traceTorso(ctx: CanvasRenderingContext2D, fr: Frame): void {
+function traceTorso(ctx: CanvasRenderingContext2D, fr: Frame, begin = true): void {
   const sw = 90 * fr.breathScale;
   const hem = fr.hipY + 22;
   const top = fr.top;
   const cx = fr.cx;
-  ctx.beginPath();
+  if (begin) ctx.beginPath();
   ctx.moveTo(cx - 100, hem);
   ctx.lineTo(cx - sw - 6, top + 58);
   ctx.quadraticCurveTo(cx - sw, top, cx - sw + 40, top - 4);
@@ -466,17 +618,27 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
   const leg = (pts: readonly Pt[], width: number, color: string): void => {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.beginPath();
-    pts.forEach(([x, y], k) => (k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    const side = lightSide();
+    const trace = (): void => {
+      ctx.beginPath();
+      pts.forEach(([x, y], k) => (k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    };
+    // Variable-weight ink: thin (≈ 0.75×) toward the light, swelling (≈ 1.3×) on the shadow side and underside.
     ctx.strokeStyle = PLUM;
-    ctx.lineWidth = width + 12;
+    ctx.lineWidth = width + 9;
+    trace();
     ctx.stroke();
+    ctx.save();
+    ctx.translate(-side * 2.2, 2.9);
+    trace();
+    ctx.stroke();
+    ctx.restore();
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.stroke();
     // Soft form shade on the far side of each leg.
     ctx.save();
-    ctx.translate(width * 0.2, 0);
+    ctx.translate(-side * width * 0.2, 0);
     ctx.beginPath();
     pts.forEach(([x, y], k) => (k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
     ctx.strokeStyle = 'rgba(30, 16, 40, 0.18)';
@@ -500,7 +662,7 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
   }
   // Hip block / garment over the top of the legs.
   if (look.bottom === 'pants') {
-    filled(ctx, () => ctx.roundRect(fr.cx - 76, fr.hipY - 34, 152, sit ? 64 : 70, 26), look.bottomColor, 9);
+    filledVar(ctx, () => ctx.roundRect(fr.cx - 76, fr.hipY - 34, 152, sit ? 64 : 70, 26), look.bottomColor, 9);
     ctx.strokeStyle = shade(look.bottomColor, 0.2);
     ctx.lineWidth = 3;
     ctx.setLineDash([6, 7]);
@@ -521,7 +683,7 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
       ctx.quadraticCurveTo(fr.cx, hem + 12, fr.cx - flare, hem);
       ctx.closePath();
     };
-    filled(ctx, tube, look.bottomColor, 9);
+    filledVar(ctx, tube, look.bottomColor, 9);
     ctx.save();
     ctx.beginPath();
     tube();
@@ -619,16 +781,17 @@ function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
   ctx.fillStyle = look.cloth;
   ctx.fill();
   ctx.clip();
-  // Persis form shade on the far side + warm light from the upper left.
+  // Persis form shade on the side away from the scene light + a warm wash on the lit side.
+  const ls = lightSide();
   ctx.fillStyle = look.clothShade;
   ctx.beginPath();
-  ctx.ellipse(cx + 118, top + 130, 62, 170, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx - ls * 118, top + 130, 62, 170, 0, 0, Math.PI * 2);
   ctx.fill();
-  const lit = ctx.createLinearGradient(cx - 110, top, cx + 20, top + 160);
-  lit.addColorStop(0, 'rgba(255, 238, 205, 0.2)');
-  lit.addColorStop(1, 'rgba(255, 238, 205, 0)');
+  const lit = ctx.createLinearGradient(cx + ls * 110, top, cx - ls * 20, top + 160);
+  lit.addColorStop(0, hexA(LIGHT.rim, 0.22 * LIGHT.rimStrength + 0.06));
+  lit.addColorStop(1, hexA(LIGHT.rim, 0));
   ctx.fillStyle = lit;
-  ctx.fillRect(cx - 120, top - 10, 140, hem - top + 20);
+  ctx.fillRect(cx - 140, top - 10, 280, hem - top + 20);
   const v = (w: number, depth: number): void => {
     ctx.beginPath();
     ctx.moveTo(cx - w, top - 6);
@@ -648,7 +811,7 @@ function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
       }
       ctx.fillStyle = 'rgba(220, 235, 255, 0.16)';
       ctx.beginPath();
-      ctx.ellipse(cx - 56, top + 140, 30, 80, -0.1, 0, Math.PI * 2);
+      ctx.ellipse(cx + ls * 56, top + 140, 30, 80, -0.1 * ls, 0, Math.PI * 2);
       ctx.fill();
       // White tee under the open jacket.
       ctx.fillStyle = look.accent;
@@ -795,8 +958,11 @@ function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
   }
   ctx.restore();
 
-  traceTorso(ctx, fr);
-  strokeOutline(ctx, 9);
+  // Soft crescent shade on the shadow side (kept light so patterns stay readable), a thin rim on the lit edge.
+  const torsoShape = (b: boolean): void => traceTorso(ctx, fr, b);
+  shadeCrescent(ctx, torsoShape, 14, look.clothShade, 0.3);
+  rimLight(ctx, torsoShape, 6, 0.55);
+  inkVar(ctx, () => traceTorso(ctx, fr), 9);
   if (look.outfit === 'kemeja' || look.outfit === 'polo' || look.outfit === 'uniform') {
     for (const s of SIGN) {
       filled(ctx, () => {
@@ -827,8 +993,24 @@ function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
 }
 
 function drawEye(ctx: CanvasRenderingContext2D, ex: number, ey: number, scaleX: number, pose: Pose, skin: string, lashes: boolean, side: -1 | 1): void {
-  const rx = 40 * scaleX;
-  const ry = 47;
+  const rx = 40 * scaleX * (1 + pose.wide * 0.3);
+  const ry = 47 * (1 + pose.wide * 0.5);
+  if (pose.happy > 0.5) {
+    // Laughing eye: a crisp happy arc ^ (the face keeps its skin; only ink is drawn).
+    const aw = rx * 0.92;
+    ctx.beginPath();
+    ctx.moveTo(ex - aw, ey + 12);
+    ctx.quadraticCurveTo(ex, ey - 46, ex + aw, ey + 12);
+    strokeOutline(ctx, lashes ? 12 : 11);
+    if (lashes) {
+      const ox = ex + side * aw;
+      ctx.beginPath();
+      ctx.moveTo(ox, ey + 8);
+      ctx.quadraticCurveTo(ox + side * 10, ey - 2, ox + side * 18, ey - 16);
+      strokeOutline(ctx, 6);
+    }
+    return;
+  }
   const closeY = ey + ry * 0.45;
   const coverage = clamp01(pose.lid + (1 - pose.lid) * pose.blink);
   const lidY = lerp(ey - ry, closeY, coverage);
@@ -843,11 +1025,11 @@ function drawEye(ctx: CanvasRenderingContext2D, ex: number, ey: number, scaleX: 
   const py = ey + 6 + pose.lookY * 14;
   ctx.fillStyle = '#4a2a1c';
   ctx.beginPath();
-  ctx.ellipse(px, py, 21 * scaleX, 23, 0, 0, Math.PI * 2);
+  ctx.ellipse(px, py, 21 * scaleX * pose.pupil, 23 * pose.pupil, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#1f120e';
   ctx.beginPath();
-  ctx.ellipse(px, py + 2, 12 * scaleX, 14, 0, 0, Math.PI * 2);
+  ctx.ellipse(px, py + 2 * pose.pupil, 12 * scaleX * pose.pupil, 14 * pose.pupil, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
@@ -888,7 +1070,7 @@ function drawEye(ctx: CanvasRenderingContext2D, ex: number, ey: number, scaleX: 
 
 function drawBrow(ctx: CanvasRenderingContext2D, color: string, ex: number, ey: number, side: -1 | 1, pose: Pose, scaleX: number, thin: boolean): void {
   const raise = pose.browRaise + pose.browAsym * 0.5 * side;
-  const baseY = ey - 47 - 32 - raise * 24;
+  const baseY = ey - 47 * (1 + pose.wide * 0.5) - 32 - raise * 24;
   const half = 36 * scaleX;
   const innerX = ex - side * half;
   const outerX = ex + side * half;
@@ -906,11 +1088,47 @@ function drawBrow(ctx: CanvasRenderingContext2D, color: string, ex: number, ey: 
 function drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, pose: Pose): void {
   const hw = 40;
   const curve = pose.smile * 22;
-  if (pose.open < 0.05) {
+  if (pose.gape > 0.5) {
+    // Laughing mouth: flat-ish top lip, deep D-shaped bowl, tongue hint.
+    const w = hw * 1.25;
+    const bowl = (): void => {
+      ctx.beginPath();
+      ctx.moveTo(x - w, y - 8);
+      ctx.quadraticCurveTo(x, y + 6, x + w, y - 8);
+      ctx.bezierCurveTo(x + w * 0.92, y + 66, x - w * 0.92, y + 66, x - w, y - 8);
+      ctx.closePath();
+    };
+    bowl();
+    ctx.fillStyle = '#4e1a2c';
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = '#e6737f';
     ctx.beginPath();
-    ctx.moveTo(x - hw, y - curve * 0.3);
-    ctx.quadraticCurveTo(x, y + curve, x + hw, y - curve * 0.3);
+    ctx.ellipse(x, y + 52, w * 0.55, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fbf5ea';
+    ctx.fillRect(x - w * 0.7, y - 10, w * 1.4, 11);
+    ctx.restore();
+    bowl();
     strokeOutline(ctx, 8);
+    return;
+  }
+  if (pose.open < 0.05) {
+    // Smirk lifts the right corner (and curls it) while the left stays flat.
+    const sm = pose.smirk;
+    const yL = y - curve * 0.3 + sm * 7;
+    const yR = y - curve * 0.3 - sm * 16;
+    ctx.beginPath();
+    ctx.moveTo(x - hw, yL);
+    ctx.quadraticCurveTo(x + sm * 8, y + curve + sm * 4, x + hw + sm * 8, yR);
+    strokeOutline(ctx, 8);
+    if (sm > 0.3) {
+      ctx.beginPath();
+      ctx.moveTo(x + hw + sm * 8, yR);
+      ctx.lineTo(x + hw + sm * 15, yR - sm * 6);
+      strokeOutline(ctx, 6);
+    }
     return;
   }
   const r = 10 + pose.open * 30;
@@ -971,19 +1189,24 @@ function traceHijabFace(ctx: CanvasRenderingContext2D, fx: number): void {
 /** Hijab back layer: hood that hugs the bean contour + soft drape that falls to `drapeY` (head-local units). */
 function drawHijabBack(ctx: CanvasRenderingContext2D, color: string, drapeY: number): void {
   const w = HEAD_HALF_W;
-  ctx.beginPath();
-  ctx.moveTo(-w * 1.06, 0);
-  ctx.bezierCurveTo(-w * 1.16, drapeY * 0.45, -w * 1.08, drapeY * 0.8, -w * 0.74, drapeY * 0.93);
-  ctx.quadraticCurveTo(0, drapeY * 1.06, w * 0.74, drapeY * 0.93);
-  ctx.bezierCurveTo(w * 1.08, drapeY * 0.8, w * 1.16, drapeY * 0.45, w * 1.06, 0);
-  ctx.closePath();
-  const g = ctx.createLinearGradient(-w, 0, w, drapeY);
+  const ls = lightSide();
+  const hood = (begin = true): void => {
+    if (begin) ctx.beginPath();
+    ctx.moveTo(-w * 1.06, 0);
+    ctx.bezierCurveTo(-w * 1.16, drapeY * 0.45, -w * 1.08, drapeY * 0.8, -w * 0.74, drapeY * 0.93);
+    ctx.quadraticCurveTo(0, drapeY * 1.06, w * 0.74, drapeY * 0.93);
+    ctx.bezierCurveTo(w * 1.08, drapeY * 0.8, w * 1.16, drapeY * 0.45, w * 1.06, 0);
+    ctx.closePath();
+  };
+  hood();
+  const g = ctx.createLinearGradient(ls * w, 0, -ls * w, drapeY);
   g.addColorStop(0, shade(color, 0.14));
   g.addColorStop(0.55, color);
   g.addColorStop(1, shade(color, -0.24));
   ctx.fillStyle = g;
   ctx.fill();
-  strokeOutline(ctx);
+  shadeCrescent(ctx, hood, 22, shade(color, -0.35), 0.2);
+  inkVar(ctx, () => hood(true));
   // Soft drape folds.
   ctx.strokeStyle = shade(color, -0.3);
   ctx.lineWidth = 10;
@@ -1004,15 +1227,24 @@ function drawHijabFront(ctx: CanvasRenderingContext2D, color: string, fx: number
   ctx.beginPath();
   traceBeanHead(ctx, 1.07);
   traceHijabFace(ctx, fx);
-  const g = ctx.createRadialGradient(-HEAD_HALF_W * 0.4, -HEAD_HALF_H * 0.6, 20, 0, 0, HEAD_HALF_W * 1.3);
+  const ls = lightSide();
+  const g = ctx.createRadialGradient(ls * HEAD_HALF_W * 0.4, -HEAD_HALF_H * 0.6, 20, 0, 0, HEAD_HALF_W * 1.3);
   g.addColorStop(0, shade(color, 0.24));
   g.addColorStop(0.55, color);
   g.addColorStop(1, shade(color, -0.2));
   ctx.fillStyle = g;
   ctx.fill('evenodd');
-  // Outer silhouette and the face opening, both inked.
-  traceBeanHead(ctx, 1.07);
-  strokeOutline(ctx);
+  // Crescent shade + rim light on the band only (the skin window keeps its own shading).
+  const bean = (b: boolean): void => traceBeanHead(ctx, 1.07, b);
+  const band = (): void => {
+    ctx.beginPath();
+    traceBeanHead(ctx, 1.07);
+    traceHijabFace(ctx, fx);
+  };
+  shadeCrescent(ctx, bean, 20, shade(color, -0.38), 0.22, band);
+  rimLight(ctx, bean, 9, 0.8, band);
+  // Outer silhouette (variable weight) and the face opening, both inked.
+  inkVar(ctx, () => traceBeanHead(ctx, 1.07));
   ctx.beginPath();
   traceHijabFace(ctx, fx);
   strokeOutline(ctx, 8);
@@ -1021,13 +1253,13 @@ function drawHijabFront(ctx: CanvasRenderingContext2D, color: string, fx: number
   ctx.strokeStyle = shade(color, 0.32);
   ctx.lineWidth = 6;
   ctx.beginPath();
-  ctx.moveTo(-HEAD_HALF_W * 0.7, -HEAD_HALF_H * 0.78);
-  ctx.quadraticCurveTo(-HEAD_HALF_W * 0.96, -HEAD_HALF_H * 0.35, -HEAD_HALF_W * 0.98, 20);
+  ctx.moveTo(ls * HEAD_HALF_W * 0.7, -HEAD_HALF_H * 0.78);
+  ctx.quadraticCurveTo(ls * HEAD_HALF_W * 0.96, -HEAD_HALF_H * 0.35, ls * HEAD_HALF_W * 0.98, 20);
   ctx.stroke();
   ctx.strokeStyle = shade(color, -0.28);
   ctx.beginPath();
-  ctx.moveTo(HEAD_HALF_W * 0.62, -HEAD_HALF_H * 0.86);
-  ctx.quadraticCurveTo(HEAD_HALF_W * 0.95, -HEAD_HALF_H * 0.4, HEAD_HALF_W * 0.97, 40);
+  ctx.moveTo(-ls * HEAD_HALF_W * 0.62, -HEAD_HALF_H * 0.86);
+  ctx.quadraticCurveTo(-ls * HEAD_HALF_W * 0.95, -HEAD_HALF_H * 0.4, -ls * HEAD_HALF_W * 0.97, 40);
   ctx.stroke();
   // Little pin under the chin.
   ctx.beginPath();
@@ -1182,10 +1414,8 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
   ctx.fill();
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = 'rgba(150, 80, 70, 0.2)';
-  ctx.beginPath();
-  ctx.ellipse(HEAD_HALF_W * 1.05 - pose.turn * 40, 30, HEAD_HALF_W * 0.55, HEAD_HALF_H * 1.3, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // Soft moon-crescent shade on the side away from the light (replaces the old fixed far-side ellipse).
+  shadeCrescent(ctx, (b) => traceBeanHead(ctx, 1, b), 15, look.skinShade, 0.3);
   const fy = pose.lookY * 8 + pose.bow * 16;
   const spacing = 72 * (1 - 0.12 * Math.abs(pose.turn));
   const sL = 1 - 0.18 * Math.max(-pose.turn, 0);
@@ -1218,8 +1448,8 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
     drawHijabFront(ctx, hijab, fx);
   } else {
     if (look.headwear.kind === 'hair') drawHair(ctx, look, look.headwear.style);
-    traceBeanHead(ctx);
-    strokeOutline(ctx);
+    rimLight(ctx, (b) => traceBeanHead(ctx, 1, b), 8);
+    inkVar(ctx, () => traceBeanHead(ctx));
   }
   if (look.glasses) drawGlasses(ctx, lx, rx, eyeY, sL, sR);
   drawBrow(ctx, look.browColor, lx, eyeY, -1, pose, sL, look.lashes);
@@ -2035,6 +2265,7 @@ export function poseLayout(body: BodyPose, d: ToonDrive, seed = 1): { head: Pt; 
 }
 
 function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: ActorSetup, d: ToonDrive, seed: number): void {
+  LIGHT = d.light ?? DEFAULT_LIGHT;
   const { pose, fr, right, left, lean, shiftX } = solve(setup.pose, d, seed);
   // Weight shift pivoting at the soles (feet stay planted).
   ctx.translate(LW / 2 + pose.shiftX * 0.4, SOLE);
