@@ -232,8 +232,13 @@ export class WorldKit {
     return s;
   }
 
-  /** Text label painted on a plane (signs, map captions, book spines). */
-  label(parent: THREE.Object3D, text: readonly string[], size: readonly [number, number], pos: Vec3, style: { bg: string; fg: string; font: string; border?: string }): THREE.Mesh {
+  /**
+   * Text label painted on a plane (signs, map captions, book spines). Every line is measured
+   * with `measureText` and shrunk so the widest line stays within 86 % of the board width
+   * (output is unchanged when the text already fits). `glow` adds an emissive copy of the map so
+   * critical plates stay legible in side-lit shadow; `letterSpacing` is in px of the 1024 px canvas.
+   */
+  label(parent: THREE.Object3D, text: readonly string[], size: readonly [number, number], pos: Vec3, style: { bg: string; fg: string; font: string; border?: string; glow?: number; letterSpacing?: number }): THREE.Mesh {
     const pxW = 1024;
     const pxH = Math.round((pxW * size[1]) / size[0]);
     const tex = this.canvas(pxW, pxH, (ctx, w, h) => {
@@ -248,12 +253,23 @@ export class WorldKit {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const lineH = h / (text.length + 0.6);
+      const maxW = w * 0.86;
+      if (style.letterSpacing) ctx.letterSpacing = `${style.letterSpacing}px`;
       text.forEach((line, i) => {
-        ctx.font = style.font.replace('{size}', String(Math.round(lineH * (i === 0 ? 0.62 : 0.42))));
+        let px = Math.round(lineH * (i === 0 ? 0.62 : 0.42));
+        ctx.font = style.font.replace('{size}', String(px));
+        const measured = ctx.measureText(line).width;
+        if (measured > maxW) {
+          px = Math.max(8, Math.floor((px * maxW) / measured));
+          ctx.font = style.font.replace('{size}', String(px));
+        }
         ctx.fillText(line, w / 2, lineH * (i + 0.8));
       });
+      if (style.letterSpacing) ctx.letterSpacing = '0px';
     });
-    return this.mesh(parent, new THREE.PlaneGeometry(size[0], size[1]), this.toon('#ffffff', { map: tex }), pos, { ink: false, shadow: false });
+    const glow = style.glow ?? 0;
+    const mat = glow > 0 ? this.toon('#ffffff', { map: tex, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: glow }) : this.toon('#ffffff', { map: tex });
+    return this.mesh(parent, new THREE.PlaneGeometry(size[0], size[1]), mat, pos, { ink: false, shadow: false });
   }
 
   /** Painted far backdrop, blurred to sit behind the depth-of-field. */

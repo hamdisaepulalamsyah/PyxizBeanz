@@ -279,7 +279,7 @@ function poseFor(d: ToonDrive, seed: number): Pose {
     breathHead: -(inhale(bp - 0.5) - 0.5) * 5,
     shiftX: weight * 6,
     shiftRot,
-    bob: d.walkPhase === null ? 0 : Math.abs(Math.sin(d.walkPhase)) * -10,
+    bob: d.walkPhase === null ? 0 : Math.cos(d.walkPhase * 2) * 3.5,
     frame: f,
   };
 }
@@ -342,15 +342,53 @@ interface Frame {
   breathScale: number;
   headX: number;
   headY: number;
-  /** Walking: per-leg shoe lift in px. */
+  /** Walking: per-leg shoe lift in px (swing phase only, ≤ 20). */
   lift: readonly [number, number];
+  /** Walking: per-leg fore-aft ankle offset in px (screen x, already multiplied by walkDir). */
+  stride: readonly [number, number];
+  /** Walking: per-leg shoe pitch in rad, + = toe up (heel strike), − = heel up (push-off). */
+  pitch: readonly [number, number];
+  /** Walking: normalised foot position −1 (back) … +1 (front) per leg, used for the opposite arm swing. */
+  footN: readonly [number, number];
+  walking: boolean;
+  walkDir: number;
 }
 
-function frameFor(pose: Pose, body: BodyPose, walkPhase: number | null): Frame {
+const STRIDE_AMP = 44;
+/**
+ * Walk phase (radians) per metre travelled at scale 1. The stance foot slides
+ * back 2·STRIDE_AMP card px over π radians, so phase = metres · PX / (2·STRIDE_AMP/π)
+ * keeps the planted shoe still on the ground (no skating). Short chibi legs
+ * therefore take quick, small steps — which reads as natural for the proportions.
+ */
+export const WALK_PHASE_PER_METRE = PX / ((2 * STRIDE_AMP) / Math.PI);
+const SWING_LIFT = 20;
+const ARM_SWING = 28;
+const WALK_LEAN = 0.07;
+
+/**
+ * One bipedal foot cycle. θ ∈ [0, π) is the swing (foot flies from back to front on a
+ * sine lift arc), θ ∈ [π, 2π) is the stance (foot flat on the floor, sliding back linearly).
+ */
+function footCycle(theta: number): { x: number; lift: number; pitch: number } {
+  const t = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  if (t < Math.PI) {
+    const u = t / Math.PI;
+    return { x: -Math.cos(t), lift: Math.sin(t), pitch: -0.42 * (1 - smoothstep(0, 0.4, u)) + 0.3 * smoothstep(0.65, 1, u) };
+  }
+  const v = (t - Math.PI) / Math.PI;
+  return { x: 1 - 2 * v, lift: 0, pitch: 0.3 * (1 - smoothstep(0, 0.25, v)) - 0.42 * smoothstep(0.7, 1, v) };
+}
+
+function frameFor(pose: Pose, body: BodyPose, walkPhase: number | null, walkDir = 1): Frame {
   const cx = HEAD_CX + pose.turn * 3;
   const seat = body === 'sit' ? SEAT_Y - HIP_Y : 0;
-  const bob = walkPhase === null ? 0 : -Math.abs(Math.sin(walkPhase)) * 8;
-  const lift = (i: number): number => (walkPhase === null || body === 'sit' ? 0 : Math.max(0, Math.sin(walkPhase + i * Math.PI)) * 22);
+  const walking = walkPhase !== null && body !== 'sit';
+  const dir = walkDir < 0 ? -1 : 1;
+  // Double-support contact (φ = 0, π) is the lowest point: a soft 3.5 px double-frequency bob.
+  const bob = walking ? Math.cos((walkPhase ?? 0) * 2) * 3.5 : 0;
+  const cyc = [0, 1].map((i) => (walking ? footCycle((walkPhase ?? 0) + i * Math.PI) : { x: 0, lift: 0, pitch: 0 }));
+  const at = <K extends 'x' | 'lift' | 'pitch'>(i: number, k: K): number => cyc[i]?.[k] ?? 0;
   return {
     pose: body,
     cx,
@@ -359,7 +397,12 @@ function frameFor(pose: Pose, body: BodyPose, walkPhase: number | null): Frame {
     breathScale: 1 + pose.breathOpen * 0.02,
     headX: HEAD_CX + pose.turn * 6,
     headY: HEAD_CY + seat + bob + pose.breathHead * 0.6 + pose.bow * 10,
-    lift: [lift(0), lift(1)],
+    lift: [at(0, 'lift') * SWING_LIFT, at(1, 'lift') * SWING_LIFT],
+    stride: [at(0, 'x') * STRIDE_AMP * dir, at(1, 'x') * STRIDE_AMP * dir],
+    pitch: [at(0, 'pitch'), at(1, 'pitch')],
+    footN: [at(0, 'x'), at(1, 'x')],
+    walking,
+    walkDir: dir,
   };
 }
 
@@ -400,10 +443,21 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
   const sit = fr.pose === 'sit';
   const legs = SIGN.map((s, i) => {
     const lift = fr.lift[i] ?? 0;
+    const pitch = fr.pitch[i] ?? 0;
     const hip: Pt = [fr.cx + s * 36, fr.hipY];
-    const knee: Pt = sit ? [fr.cx + s * 42, fr.hipY + 30] : [fr.cx + s * 38, lerp(fr.hipY, SOLE, 0.5) - lift * 0.5];
-    const ankle: Pt = [fr.cx + s * (sit ? 46 : 40), SOLE - 28 - lift];
-    return { s, hip, knee, ankle, lift };
+    // Heel rises with the push-off pitch, so the ankle follows it.
+    const ankle: Pt = [fr.cx + s * (sit ? 46 : 40) + (fr.stride[i] ?? 0), SOLE - 28 - lift - Math.max(0, -pitch) * 30];
+    let knee: Pt = sit ? [fr.cx + s * 42, fr.hipY + 30] : [fr.cx + s * 38, lerp(fr.hipY, SOLE, 0.5) - lift * 0.5];
+    if (fr.walking && !sit) {
+      // Two-bone IK: thigh = shin, the knee always bends forward (toward walkDir).
+      const half = (SOLE - 28 - HIP_Y) / 2 * 1.004;
+      const dx = ankle[0] - hip[0];
+      const dy = ankle[1] - hip[1];
+      const d = Math.max(1, Math.hypot(dx, dy));
+      const h = Math.sqrt(Math.max(0, half * half - (d / 2) * (d / 2)));
+      knee = [(hip[0] + ankle[0]) / 2 + (dy / d) * h * fr.walkDir, (hip[1] + ankle[1]) / 2 - (dx / d) * h * fr.walkDir];
+    }
+    return { s, hip, knee, ankle, lift, pitch };
   });
   const pants = look.bottom === 'pants' || look.bottom === 'sarung';
   const legColor = pants ? look.bottomColor : look.skin;
@@ -430,7 +484,18 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
   };
   for (const l of legs) leg([l.hip, l.knee, l.ankle], pants ? 50 : 30, legColor);
   // Shoes (drawn after both legs so the near shoe overlaps cleanly).
-  for (const l of legs) drawShoe(ctx, look, l.ankle[0] + l.s * 12, SOLE - l.lift, l.s);
+  for (const l of legs) {
+    // Pitch about the toe (heel up) or the heel (toe up) so a planted shoe never sinks below SOLE.
+    const sx = l.ankle[0] + l.s * 12;
+    const px = sx + (l.pitch < 0 ? 1 : -1) * fr.walkDir * 48;
+    const py = SOLE - l.lift;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-l.pitch * fr.walkDir);
+    ctx.translate(-px, -py);
+    drawShoe(ctx, look, sx, SOLE - l.lift, l.s);
+    ctx.restore();
+  }
   // Hip block / garment over the top of the legs.
   if (look.bottom === 'pants') {
     filled(ctx, () => ctx.roundRect(fr.cx - 76, fr.hipY - 34, 152, sit ? 64 : 70, 26), look.bottomColor, 9);
@@ -1195,6 +1260,29 @@ interface ArmCtx {
   progress: number;
   drawProgress: number;
   mouth: Pt;
+  /** Walking counter-swing of the hands in px (screen x), per arm. */
+  swing: readonly [number, number];
+}
+
+/** Natural idle micro-motion, phase-offset per arm so the two hands never mirror. */
+function idle(frame: number, side: 0 | 1, hz: number, amp: number, phase = 0): number {
+  return Math.sin(frame * hz + side * 2.3 + phase) * amp;
+}
+
+/** Poses whose arm is drawn in front of the torso (everything else is tucked behind it). */
+const FRONT_POSES: ReadonlySet<ArmPose> = new Set<ArmPose>(['strap', 'write', 'pressPage', 'chalk', 'holdBoard', 'hug', 'basketLap', 'ticket', 'newspaper', 'whistle']);
+
+/** Presenter gestures: weight 0..1 of how strongly the torso follows the arm. */
+const GESTURE_LEAN: Partial<Record<ArmPose, number>> = { point: 1, pointHigh: 0.8, pointSide: 1, trace: 0.8, traceLow: 0.7, palm: 0.7, spread: 0.45, wave: 0.4, reachUp: 0.55 };
+
+/** Extra downward sag of the elbow (gravity) per pose. */
+const ELBOW_SAG: Partial<Record<ArmPose, number>> = { spread: 34, palm: 28, pointSide: 30, trace: 14, traceLow: 10, point: 10 };
+
+/** Smootherstep with a soft overshoot/settle near the end, so gestures land organically. */
+function gestureEase(m: number): number {
+  const c = clamp01(m);
+  const e = c * c * c * (c * (c * 6 - 15) + 10);
+  return e + 0.05 * Math.sin(Math.PI * clamp01((c - 0.5) / 0.5));
 }
 
 function shoulderOf(side: 0 | 1, fr: Frame): Pt {
@@ -1211,7 +1299,7 @@ function wristTarget(pose: ArmPose, side: 0 | 1, c: ArmCtx): Pt {
   const sit = fr.pose === 'sit';
   switch (pose) {
     case 'side':
-      return at(112 + Math.sin(frame * 0.05 + side) * 2, hipY - 30);
+      return [cx + s * 112 + idle(frame, side, 0.05, 2.5) + (c.swing[side] ?? 0), hipY - 30 + idle(frame, side, 0.04, 2, 1)];
     case 'lap':
     case 'knee':
       return sit ? at(50, hipY + 8) : at(112, hipY - 30);
@@ -1226,15 +1314,15 @@ function wristTarget(pose: ArmPose, side: 0 | 1, c: ArmCtx): Pt {
     case 'pointHigh':
       return at(250, sy - 160);
     case 'pointSide':
-      return at(280, sy + 60);
+      return at(262 + idle(frame, side, 0.045, 4), sy + 98 + idle(frame, side, 0.06, 3));
     case 'spread':
-      return at(286, sy - 10);
+      return at(228 + idle(frame, side, 0.05, 5), sy + 92 + idle(frame, side, 0.07, 4, 1.7));
     case 'trace':
       return at(284 + Math.sin(frame * 0.06) * 6, sy + 12 + Math.sin(frame * 0.11) * 4);
     case 'traceLow':
       return at(276 + Math.sin(frame * 0.06) * 6, sy + 100 + Math.sin(frame * 0.1) * 3);
     case 'palm':
-      return at(236 + Math.sin(frame * 0.07 + side) * 5, sy + 50 + Math.sin(frame * 0.05) * 4);
+      return at(212 + idle(frame, side, 0.07, 5), sy + 96 + idle(frame, side, 0.05, 4, 0.9));
     case 'write': {
       const [wx, wy] = notebookWritePoint(cx, frame, c.progress);
       return [wx - 9, wy - 22];
@@ -1287,7 +1375,7 @@ interface ArmShape {
 }
 
 /** One smooth quadratic curve; the closer the wrist, the more the elbow bows outward. */
-function shapeArm(side: 0 | 1, raw: Pt, fr: Frame): ArmShape {
+function shapeArm(side: 0 | 1, raw: Pt, fr: Frame, sag = 0): ArmShape {
   const s = SIGN[side];
   const shoulder = shoulderOf(side, fr);
   const wrist: Pt = [Math.min(LW - HAND_MARGIN, Math.max(HAND_MARGIN, raw[0])), Math.max(HAND_MARGIN, raw[1])];
@@ -1302,7 +1390,7 @@ function shapeArm(side: 0 | 1, raw: Pt, fr: Frame): ArmShape {
     py = -py;
   }
   const mid: Pt = [(shoulder[0] + wrist[0]) / 2, (shoulder[1] + wrist[1]) / 2];
-  return { shoulder, wrist, ctrl: [mid[0] + px * bow, mid[1] + py * bow] };
+  return { shoulder, wrist, ctrl: [mid[0] + px * bow, mid[1] + py * bow + sag] };
 }
 
 function splitQuad(a: Pt, c: Pt, b: Pt, t: number): { first: [Pt, Pt, Pt]; second: [Pt, Pt, Pt] } {
@@ -1413,11 +1501,49 @@ function atHandScale(ctx: CanvasRenderingContext2D, wrist: Pt, draw: () => void)
   ctx.restore();
 }
 
-function drawArm(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmShape, shape: HandShape, s: number, pocket: boolean): void {
+/**
+ * Hose for an arm drawn in FRONT of the torso: the shoulder root is fill-only (sleeve colour,
+ * no plum cap) so no thick outlined capsule cuts across the collar, buttons or hijab. The ink
+ * outline only starts once the sleeve has left the shoulder socket.
+ */
+function hoseFront(ctx: CanvasRenderingContext2D, q: readonly [Pt, Pt, Pt], width: number, color: string, socket: Pt): void {
+  const path = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(q[0][0], q[0][1]);
+    ctx.quadraticCurveTo(q[1][0], q[1][1], q[2][0], q[2][1]);
+  };
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-2000, -2000, 4000, 4000);
+  ctx.arc(socket[0], socket[1], 46, 0, Math.PI * 2);
+  ctx.clip('evenodd');
+  path();
+  ctx.strokeStyle = PLUM;
+  ctx.lineWidth = width + 14;
+  ctx.stroke();
+  ctx.restore();
+  path();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(width * 0.16, width * 0.12);
+  path();
+  ctx.strokeStyle = 'rgba(40, 20, 50, 0.2)';
+  ctx.lineWidth = width * 0.4;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** The sleeve / forearm hose. `front` arms cross the torso; back arms are painted before the body. */
+function drawArmHose(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmShape, front: boolean): void {
   const q: [Pt, Pt, Pt] = [arm.shoulder, arm.ctrl, arm.wrist];
   const short = look.outfit === 'kaos' || look.outfit === 'polo';
-  hose(ctx, q, 36, short ? look.skin : look.cloth);
-  if (short) hose(ctx, splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.42).first, 44, look.cloth);
+  const run = front ? (qq: readonly [Pt, Pt, Pt], w: number, c: string): void => hoseFront(ctx, qq, w, c, arm.shoulder) : (qq: readonly [Pt, Pt, Pt], w: number, c: string): void => hose(ctx, qq, w, c);
+  run(q, 36, short ? look.skin : look.cloth);
+  if (short) run(splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.42).first, 44, look.cloth);
   else {
     const cuff = splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.86).second;
     ctx.lineCap = 'butt';
@@ -1428,6 +1554,19 @@ function drawArm(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmShape, 
     ctx.lineWidth = 36;
     ctx.stroke();
   }
+  if (front) {
+    // Soft socket shade so the sleeve melts into the chest instead of ending in a seam.
+    const g = ctx.createRadialGradient(arm.shoulder[0], arm.shoulder[1], 4, arm.shoulder[0], arm.shoulder[1], 40);
+    g.addColorStop(0, 'rgba(40, 20, 50, 0.16)');
+    g.addColorStop(1, 'rgba(40, 20, 50, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(arm.shoulder[0], arm.shoulder[1], 40, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawArmHand(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmShape, shape: HandShape, s: number, pocket: boolean): void {
   atHandScale(ctx, arm.wrist, () => drawMitten(ctx, look, arm, pocket ? 'fist' : shape, s));
   if (pocket) filled(ctx, () => ctx.roundRect(arm.wrist[0] - 28, arm.wrist[1] - 4, 56, 30, 7), look.cloth, 6);
 }
@@ -1844,17 +1983,38 @@ function normalMap(): THREE.CanvasTexture {
 
 // ── Character assembly ──────────────────────────────────────────────────────
 
-function solve(body: BodyPose, d: ToonDrive, seed: number): { pose: Pose; fr: Frame; right: ArmShape; left: ArmShape } {
+interface Solved {
+  pose: Pose;
+  fr: Frame;
+  right: ArmShape;
+  left: ArmShape;
+  /** Upper-body lean (rad, + = clockwise / head toward +x) and shift (px) about the hips. */
+  lean: number;
+  shiftX: number;
+}
+
+function solve(body: BodyPose, d: ToonDrive, seed: number): Solved {
   const pose = poseFor(d, seed);
-  const fr = frameFor(pose, body, d.walkPhase);
+  const fr = frameFor(pose, body, d.walkPhase, d.walkDir);
   const mouth: Pt = [fr.headX + pose.turn * 72 * 1.1 * HEAD_SCALE, fr.headY + (pose.lookY * 8 + pose.bow * 16 + 128) * HEAD_SCALE];
-  const c: ArmCtx = { fr, frame: d.frame, progress: d.progress, drawProgress: d.drawProgress, mouth };
+  // Hands counter-swing against the leg on the same side (opposite phase).
+  const swing: [number, number] = fr.walking ? [-(fr.footN[0] ?? 0) * ARM_SWING * fr.walkDir, -(fr.footN[1] ?? 0) * ARM_SWING * fr.walkDir] : [0, 0];
+  const c: ArmCtx = { fr, frame: d.frame, progress: d.progress, drawProgress: d.drawProgress, mouth, swing };
   const arm = (side: 0 | 1, b: ArmBlend): ArmShape => {
+    const m = gestureEase(b.mix);
     const a = wristTarget(b.from, side, c);
     const z = wristTarget(b.to, side, c);
-    return shapeArm(side, [lerp(a[0], z[0], b.mix), lerp(a[1], z[1], b.mix)], fr);
+    const sag = lerp(ELBOW_SAG[b.from] ?? 0, ELBOW_SAG[b.to] ?? 0, m);
+    return shapeArm(side, [lerp(a[0], z[0], m), lerp(a[1], z[1], m)], fr, sag);
   };
-  return { pose, fr, right: arm(0, d.armRight), left: arm(1, d.armLeft) };
+  // The torso follows the presenting arm: a couple of degrees and a few px toward the gesture side.
+  let gesture = 0;
+  for (const [side, b] of [[0, d.armRight], [1, d.armLeft]] as const) {
+    const m = gestureEase(b.mix);
+    gesture += SIGN[side] * lerp(GESTURE_LEAN[b.from] ?? 0, GESTURE_LEAN[b.to] ?? 0, m);
+  }
+  const lean = gesture * 0.028 + (fr.walking ? WALK_LEAN * fr.walkDir : 0);
+  return { pose, fr, right: arm(0, d.armRight), left: arm(1, d.armLeft), lean, shiftX: gesture * 5 };
 }
 
 /** Head, chest, shoulder and wrist positions in card-local metres at scale 1 (x right, y up from the soles). Pure. */
@@ -1865,26 +2025,53 @@ export function poseLayout(body: BodyPose, d: ToonDrive, seed = 1): { head: Pt; 
 }
 
 function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: ActorSetup, d: ToonDrive, seed: number): void {
-  const { pose, fr, right, left } = solve(setup.pose, d, seed);
+  const { pose, fr, right, left, lean, shiftX } = solve(setup.pose, d, seed);
   // Weight shift pivoting at the soles (feet stay planted).
   ctx.translate(LW / 2 + pose.shiftX * 0.4, SOLE);
   ctx.rotate(pose.shiftRot * 0.6);
   ctx.translate(-LW / 2, -SOLE);
-  drawPackBehind(ctx, look, fr);
-  drawLegs(ctx, look, fr);
-  drawBody(ctx, look, fr);
-  if (setup.bodyProp === 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.progress, d.drawProgress);
-  drawHead(ctx, look, pose, fr);
-  if (setup.bodyProp !== 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.progress, d.drawProgress);
+  // Upper body (pack, torso, head, arms) leans about the hips; the legs stay planted.
+  const upper = (fn: () => void): void => {
+    ctx.save();
+    ctx.translate(fr.cx + shiftX, fr.hipY);
+    ctx.rotate(lean);
+    ctx.translate(-fr.cx, -fr.hipY);
+    fn();
+    ctx.restore();
+  };
+  const sides = [0, 1] as const;
+  const arms = [right, left] as const;
+  const blends = [d.armRight, d.armLeft] as const;
+  const props = [setup.rightProp, setup.leftProp] as const;
   const shapes = [handShapeFor(d.armRight), handShapeFor(d.armLeft)] as const;
-  const pockets = [d.armRight, d.armLeft].map((b) => (b.mix < 0.5 ? b.from : b.to) === 'pocket');
+  const pockets = blends.map((b) => (b.mix < 0.5 ? b.from : b.to) === 'pocket');
+  const front = blends.map((b) => FRONT_POSES.has(b.mix < 0.5 ? b.from : b.to));
   const below = (p: HandProp): boolean => p === 'suitcase' || p === 'signalLamp';
-  for (const [arm, prop, side] of [[right, setup.rightProp, 0], [left, setup.leftProp, 1]] as const) {
-    const propAt = (): void => atHandScale(ctx, arm.wrist, () => drawHandProp(ctx, prop, arm, SIGN[side], d.frame));
-    if (below(prop)) propAt();
-    drawArm(ctx, look, arm, prop === 'none' ? shapes[side] : 'fist', SIGN[side], pockets[side] ?? false);
-    if (!below(prop)) propAt();
-  }
+  // Back arms start inside the torso silhouette so the chest outline hides the shoulder root.
+  const root = (side: 0 | 1): ArmShape => {
+    const a = arms[side];
+    return { ...a, shoulder: [a.shoulder[0] - SIGN[side] * 30, a.shoulder[1] + 4] };
+  };
+
+  upper(() => drawPackBehind(ctx, look, fr));
+  drawLegs(ctx, look, fr);
+  upper(() => {
+    for (const side of sides) if (!front[side]) drawArmHose(ctx, look, root(side), false);
+    drawBody(ctx, look, fr);
+    if (setup.bodyProp === 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.progress, d.drawProgress);
+    drawHead(ctx, look, pose, fr);
+    if (setup.bodyProp !== 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.progress, d.drawProgress);
+    for (const side of sides) {
+      const arm = arms[side];
+      const prop = props[side];
+      const propAt = (): void => atHandScale(ctx, arm.wrist, () => drawHandProp(ctx, prop, arm, SIGN[side], d.frame));
+      if (front[side]) drawArmHose(ctx, look, arm, true);
+      // Hands and held props always sit on top of the body (a hand in a pocket must stay visible).
+      if (below(prop)) propAt();
+      drawArmHand(ctx, look, arm, prop === 'none' ? shapes[side] : 'fist', SIGN[side], pockets[side] ?? false);
+      if (!below(prop)) propAt();
+    }
+  });
 }
 
 // ── Lit card actor ──────────────────────────────────────────────────────────
