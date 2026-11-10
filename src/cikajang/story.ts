@@ -66,7 +66,7 @@ export type WorldId =
   | 'cikajangToday'
   | 'garut2022';
 
-/** Every on-screen figure (lead, extras and animals) uses the same billboard toon system. */
+/** Every on-screen figure (lead, extras and animals) is a pyxis-beanhead-style billboard (see skills/pyxis-beanhead-style). */
 export type LookId =
   | 'dinda'
   | 'petani'
@@ -90,10 +90,9 @@ export type LookId =
   | 'ayam'
   | 'kucing';
 
-export type BodyPose = 'stand' | 'sit' | 'crouch';
 
 /**
- * Named hand targets. Arms are always drawn (2-bone IK from the shoulder), so a
+ * Named wrist targets. Arms are always drawn as smooth rubber-hose curves, so a
  * change of pose blends the hand target smoothly — hands never pop in or vanish.
  */
 export type ArmPose =
@@ -149,7 +148,6 @@ export interface CastMember {
   /** Named anchor exported by the world builder (bottom-centre, on the floor). */
   anchor: string;
   scale: number;
-  pose: BodyPose;
   /** Visible only inside this progress window (default whole shot). */
   visible?: readonly [number, number];
   expression: Keys<Expression>;
@@ -197,7 +195,7 @@ const COLOUR: Grade = { sepia: [[0, 0]] };
 const SEPIA: Grade = { sepia: [[0, 0.92]] };
 
 /** Present-day lead: denim jacket, hijab, backpack, sneakers. */
-const dinda = (m: Omit<CastMember, 'actor' | 'scale'> & { scale?: number }): CastMember => ({ actor: 'dinda', scale: 1, bodyProp: 'backpack', ...m });
+const dinda = (m: Omit<CastMember, 'actor' | 'scale'> & { scale?: number }): CastMember => ({ actor: 'dinda', scale: 1.2, bodyProp: 'backpack', ...m });
 
 export const SHOTS: readonly Shot[] = [
   // 1 — Rear door at golden dusk: Dinda traces the carved "1930 – 1982".
@@ -212,15 +210,14 @@ export const SHOTS: readonly Shot[] = [
     // 3/4 medium shot from the right: Dinda's head, hijab, backpack and the arm reaching
     // from her shoulder to the carving all stay in frame, then a slow dolly-out.
     camera: [
-      { t: 0, pos: [0.62, 1.32, 1.95], target: [0.04, 1.12, -0.8], fov: 38 },
-      { t: 0.45, pos: [0.7, 1.38, 2.8], target: [0.12, 1.1, -0.8], fov: 38 },
-      { t: 1, pos: [0.75, 1.5, 4.8], target: [0.3, 1.08, -0.8], fov: 38 },
+      { t: 0, pos: [0.6, 0.95, 2.4], target: [0.1, 0.72, -0.8], fov: 38 },
+      { t: 0.45, pos: [0.68, 1.0, 3.1], target: [0.15, 0.74, -0.8], fov: 38 },
+      { t: 1, pos: [0.75, 1.15, 4.8], target: [0.3, 0.8, -0.8], fov: 38 },
     ],
     grade: { sepia: [[0, 0]], tone: 0.6 },
     cast: [
       dinda({
         anchor: 'dindaTrace',
-        pose: 'stand',
         expression: [[0, 'thinking'], [0.6, 'wonder']],
         right: [[0, 'trace']],
         left: [[0, 'strap'], [0.72, 'strap'], [0.82, 'palm']],
@@ -238,23 +235,22 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'PERON CIKAJANG', year: '1.246 MDPL' }]],
     aperture: [[0, 0.55], [0.7, 0.4], [1, 0.25]],
     camera: [
-      { t: 0, pos: [0.5, 1.45, 3.6], target: [-0.3, 1.45, -1.6], fov: 40 },
-      { t: 0.45, pos: [0.2, 1.6, 3.9], target: [-0.6, 1.6, -1.6], fov: 40 },
-      { t: 0.75, pos: [0.0, 3.4, 5.2], target: [-0.4, 3.6, -12], fov: 42 },
+      { t: 0, pos: [0.45, 1.25, 3.5], target: [-0.35, 1.25, -1.6], fov: 40 },
+      { t: 0.45, pos: [0.2, 1.35, 3.8], target: [-0.5, 1.35, -1.6], fov: 40 },
+      { t: 0.75, pos: [0.0, 3.0, 5.2], target: [-0.4, 3.4, -12], fov: 42 },
       { t: 1, pos: [0.0, 6.6, 6.2], target: [0, 9.5, -60], fov: 44 },
     ],
     grade: COLOUR,
     cast: [
       dinda({
         anchor: 'dinda',
-        pose: 'stand',
         expression: [[0, 'neutral'], [0.15, 'warm']],
         right: [[0, 'side'], [0.16, 'pointHigh'], [0.52, 'pointHigh'], [0.62, 'palm'], [0.8, 'palm'], [0.9, 'side']],
         left: [[0, 'strap']],
         turn: [[0, -0.6], [0.12, 0]],
       }),
-      { actor: 'ayam', anchor: 'ayam', scale: 1, pose: 'stand', expression: [[0, 'neutral']], move: [[0, [-1.6, 0, 0]], [1, [2.6, 0, 0.2]]] },
-      { actor: 'anak', anchor: 'anak', scale: 0.68, pose: 'stand', expression: [[0, 'warm']], right: [[0, 'wave']], left: [[0, 'side']] },
+      { actor: 'ayam', anchor: 'ayam', scale: 1, expression: [[0, 'neutral']], move: [[0, [-1.6, 0, 0]], [1, [2.6, 0, 0.2]]] },
+      { actor: 'anak', anchor: 'anak', scale: 0.82, expression: [[0, 'warm']], right: [[0, 'wave']], left: [[0, 'side']] },
     ],
   },
   // 3 — 1930s vegetable slopes at misty dawn (sepia); pan to the empty rails.
@@ -267,9 +263,9 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'LERENG CIKAJANG', year: '1930-AN' }]],
     aperture: [[0, 0.5]],
     camera: [
-      { t: 0, pos: [-3.7, 1.45, 3.2], target: [-4.1, 1.05, 0.35], fov: 38 },
-      { t: 0.3, pos: [-3.3, 1.45, 3.3], target: [-3.6, 1.0, 0.3], fov: 38 },
-      { t: 0.58, pos: [-1.0, 1.6, 3.1], target: [-1.0, 0.95, -1.45], fov: 38 },
+      { t: 0, pos: [-3.7, 1.0, 3.0], target: [-4.1, 0.7, 0.35], fov: 38 },
+      { t: 0.3, pos: [-3.3, 1.0, 3.1], target: [-3.6, 0.68, 0.3], fov: 38 },
+      { t: 0.58, pos: [-1.0, 1.25, 2.9], target: [-1.0, 0.98, -1.45], fov: 38 },
       { t: 1, pos: [6.4, 1.7, 3.8], target: [9.4, 0.4, -6], fov: 40 },
     ],
     grade: SEPIA,
@@ -277,8 +273,7 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'petani',
         anchor: 'petani',
-        scale: 1.02,
-        pose: 'stand',
+        scale: 1.1,
         expression: [[0, 'neutral'], [0.4, 'warm']],
         right: [[0, 'carryShoulder']],
         left: [[0, 'side']],
@@ -289,8 +284,7 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'warga',
         anchor: 'petani2',
-        scale: 0.98,
-        pose: 'crouch',
+        scale: 1.05,
         expression: [[0, 'neutral']],
         right: [[0, 'knee'], [0.52, 'traceLow'], [0.62, 'traceLow'], [0.68, 'knee']],
         left: [[0, 'knee']],
@@ -308,8 +302,8 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'KANTOR STASIUN', year: '31 JULI 1930' }]],
     aperture: [[0, 0.55], [0.7, 0.7], [1, 0.9]],
     camera: [
-      { t: 0, pos: [0.35, 1.5, 2.4], target: [0.05, 1.0, -1.2], fov: 40 },
-      { t: 0.32, pos: [1.75, 1.3, 0.75], target: [2.4, 0.95, -2.5], fov: 38 },
+      { t: 0, pos: [0.35, 1.3, 2.4], target: [0.05, 1.0, -1.2], fov: 40 },
+      { t: 0.32, pos: [1.75, 1.3, 0.75], target: [2.4, 1.0, -2.66], fov: 38 },
       { t: 0.62, pos: [0.25, 1.25, 1.0], target: [-0.05, 0.95, -1.1], fov: 38 },
       { t: 1, pos: [-0.62, 1.0, 0.02], target: [-0.66, 0.93, -0.5], fov: 30 },
     ],
@@ -318,8 +312,7 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'kepalaStasiun',
         anchor: 'desk',
-        scale: 1.05,
-        pose: 'sit',
+        scale: 1.1,
         expression: [[0, 'serious'], [0.5, 'thinking']],
         right: [[0, 'write']],
         left: [[0, 'pressPage']],
@@ -331,7 +324,6 @@ export const SHOTS: readonly Shot[] = [
         actor: 'stafKoran',
         anchor: 'corner',
         scale: 1,
-        pose: 'sit',
         expression: [[0, 'thinking'], [0.5, 'wonder']],
         right: [[0, 'newspaper']],
         left: [[0, 'newspaper']],
@@ -349,9 +341,9 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'STASIUN CIBATU', year: '06.04' }]],
     aperture: [[0, 0.5], [0.5, 0.35], [1, 0.4]],
     camera: [
-      { t: 0, pos: [0.5, 3.0, 0.7], target: [0.5, 3.25, -2.0], fov: 48 },
-      { t: 0.45, pos: [0.55, 1.85, 6.2], target: [0.5, 2.1, -1.8], fov: 24 },
-      { t: 0.7, pos: [1.6, 1.7, 5.4], target: [2.6, 1.4, -1.0], fov: 34 },
+      { t: 0, pos: [0.5, 2.7, 0.7], target: [0.5, 2.85, -2.0], fov: 40 },
+      { t: 0.45, pos: [0.55, 1.6, 6.2], target: [0.5, 1.85, -1.8], fov: 24 },
+      { t: 0.7, pos: [1.6, 1.35, 5.4], target: [2.6, 1.1, -1.0], fov: 34 },
       { t: 1, pos: [4.0, 1.8, 5.4], target: [9.0, 1.4, 0.8], fov: 38 },
     ],
     grade: SEPIA,
@@ -359,8 +351,7 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'kondektur',
         anchor: 'kondektur',
-        scale: 1.04,
-        pose: 'stand',
+        scale: 1.1,
         expression: [[0, 'serious']],
         right: [[0, 'side'], [0.18, 'whistle'], [0.62, 'whistle'], [0.72, 'side']],
         left: [[0, 'lampLow']],
@@ -368,9 +359,9 @@ export const SHOTS: readonly Shot[] = [
         leftProp: 'signalLamp',
         turn: [[0, 0.3]],
       },
-      { actor: 'penumpangPria', anchor: 'queue1', scale: 1.02, pose: 'stand', expression: [[0, 'neutral']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, -0.5]], move: [[0, [0, 0, 0]], [0.6, [-0.35, 0, 0]]] },
-      { actor: 'penumpangWanita', anchor: 'queue2', scale: 0.96, pose: 'stand', expression: [[0, 'warm']], right: [[0, 'side']], left: [[0, 'suitcase']], leftProp: 'suitcase', turn: [[0, -0.5]], move: [[0, [0, 0, 0]], [0.6, [-0.35, 0, 0]]] },
-      { actor: 'bapakPeci', anchor: 'queue3', scale: 1.0, pose: 'stand', expression: [[0, 'neutral']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, -0.5]], move: [[0, [0, 0, 0]], [0.6, [-0.35, 0, 0]]] },
+      { actor: 'penumpangPria', anchor: 'queue1', scale: 1.1, expression: [[0, 'neutral']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, -0.5]], move: [[0, [0, 0, 0]], [0.6, [-0.35, 0, 0]]] },
+      { actor: 'penumpangWanita', anchor: 'queue2', scale: 1.05, expression: [[0, 'warm']], right: [[0, 'side']], left: [[0, 'suitcase']], leftProp: 'suitcase', turn: [[0, -0.5]], move: [[0, [0, 0, 0]], [0.6, [-0.35, 0, 0]]] },
+      { actor: 'bapakPeci', anchor: 'queue3', scale: 1.1, expression: [[0, 'neutral']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, -0.5]], move: [[0, [0, 0, 0]], [0.6, [-0.35, 0, 0]]] },
     ],
   },
   // 6 — Inside the 3rd-class carriage climbing at 08.25: longitudinal benches, sacks on laps.
@@ -383,17 +374,17 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'GERBONG KELAS III', year: '08.25' }]],
     aperture: [[0, 0.45]],
     camera: [
-      { t: 0, pos: [-4.4, 1.2, 1.15], target: [-4.1, 0.95, -1.0], fov: 50 },
-      { t: 1, pos: [3.0, 1.25, 1.15], target: [3.3, 0.95, -1.0], fov: 50 },
+      { t: 0, pos: [-4.4, 1.2, 1.15], target: [-4.1, 1.0, -1.0], fov: 50 },
+      { t: 1, pos: [3.0, 1.25, 1.15], target: [3.3, 1.0, -1.0], fov: 50 },
     ],
     grade: SEPIA,
     cast: [
-      { actor: 'bapakPeci', anchor: 'seat1', scale: 1.0, pose: 'sit', expression: [[0, 'thinking']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.5]] },
-      { actor: 'petani', anchor: 'seat2', scale: 1.0, pose: 'sit', expression: [[0, 'neutral']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.2]] },
-      { actor: 'ibuBakul', anchor: 'seat3', scale: 0.97, pose: 'sit', expression: [[0, 'warm']], right: [[0, 'basketLap']], left: [[0, 'basketLap']], bodyProp: 'lapBakul', turn: [[0, 0.4]] },
-      { actor: 'anak', anchor: 'seat4', scale: 0.7, pose: 'stand', expression: [[0, 'wonder']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.8]] },
-      { actor: 'penumpangWanita', anchor: 'seat5', scale: 0.96, pose: 'sit', expression: [[0, 'neutral']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.3]] },
-      { actor: 'penumpangPria', anchor: 'seat6', scale: 1.02, pose: 'sit', expression: [[0, 'thinking']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.6]] },
+      { actor: 'bapakPeci', anchor: 'seat1', scale: 1.1, expression: [[0, 'thinking']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.5]] },
+      { actor: 'petani', anchor: 'seat2', scale: 1.1, expression: [[0, 'neutral']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.2]] },
+      { actor: 'ibuBakul', anchor: 'seat3', scale: 1.05, expression: [[0, 'warm']], right: [[0, 'basketLap']], left: [[0, 'basketLap']], bodyProp: 'lapBakul', turn: [[0, 0.4]] },
+      { actor: 'anak', anchor: 'seat4', scale: 0.82, expression: [[0, 'wonder']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.8]] },
+      { actor: 'penumpangWanita', anchor: 'seat5', scale: 1.05, expression: [[0, 'neutral']], right: [[0, 'hug']], left: [[0, 'hug']], bodyProp: 'lapSack', turn: [[0, -0.3]] },
+      { actor: 'penumpangPria', anchor: 'seat6', scale: 1.1, expression: [[0, 'thinking']], right: [[0, 'lap']], left: [[0, 'lap']], turn: [[0, 0.6]] },
     ],
   },
   // 7 — Garut 1935 timetable "5x", whip-pan to 1947 rail repairs.
@@ -409,25 +400,24 @@ export const SHOTS: readonly Shot[] = [
     ],
     aperture: [[0, 0.5]],
     camera: [
-      { t: 0, pos: [0.1, 1.6, 3.6], target: [-0.8, 1.65, -2.2], fov: 38 },
-      { t: 0.49, pos: [0.0, 1.6, 3.0], target: [-0.9, 1.75, -2.2], fov: 36 },
-      { t: 0.535, pos: [6.6, 1.5, 3.6], target: [9.0, 0.7, 0.5], fov: 38 },
-      { t: 1, pos: [8.0, 1.2, 2.5], target: [9.1, 0.55, 0.4], fov: 36 },
+      { t: 0, pos: [0.1, 1.3, 3.6], target: [-0.8, 1.3, -2.2], fov: 38 },
+      { t: 0.49, pos: [0.0, 1.3, 3.0], target: [-0.9, 1.35, -2.2], fov: 36 },
+      { t: 0.535, pos: [6.6, 1.2, 3.6], target: [9.0, 0.6, 0.5], fov: 38 },
+      { t: 1, pos: [8.0, 1.0, 2.5], target: [9.1, 0.55, 0.4], fov: 36 },
     ],
     grade: SEPIA,
     cast: [
       {
         actor: 'petugas1935',
         anchor: 'petugas',
-        scale: 1.04,
-        pose: 'stand',
+        scale: 1.1,
         expression: [[0, 'warm'], [0.25, 'serious']],
         right: [[0, 'side'], [0.1, 'point'], [0.45, 'point']],
         left: [[0, 'hip']],
         turn: [[0, -0.4], [0.25, 0]],
       },
-      { actor: 'pekerjaRel', anchor: 'pekerja1', scale: 1.02, pose: 'crouch', expression: [[0, 'serious']], right: [[0, 'hammer']], left: [[0, 'knee']], rightProp: 'hammer', turn: [[0, -0.3]] },
-      { actor: 'pekerjaRel2', anchor: 'pekerja2', scale: 1.04, pose: 'stand', expression: [[0, 'neutral']], right: [[0, 'hammer']], left: [[0, 'hip']], rightProp: 'hammer', turn: [[0, 0.4]] },
+      { actor: 'pekerjaRel', anchor: 'pekerja1', scale: 1.1, expression: [[0, 'serious']], right: [[0, 'hammer']], left: [[0, 'knee']], rightProp: 'hammer', turn: [[0, -0.3]] },
+      { actor: 'pekerjaRel2', anchor: 'pekerja2', scale: 1.1, expression: [[0, 'neutral']], right: [[0, 'hammer']], left: [[0, 'hip']], rightProp: 'hammer', turn: [[0, 0.4]] },
     ],
   },
   // 8 — Dim early-1980s office: one chalk draws the falling line; rack focus to the old loco.
@@ -440,18 +430,17 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'KANTOR STASIUN', year: 'AWAL 1980-AN' }]],
     aperture: [[0, 0.5], [0.55, 0.75], [1, 0.95]],
     camera: [
-      { t: 0, pos: [0.7, 1.35, 2.9], target: [0.05, 0.9, -1.0], fov: 38 },
-      { t: 0.55, pos: [0.12, 0.98, 0.45], target: [0.02, 0.82, -1.0], fov: 34 },
+      { t: 0, pos: [0.7, 1.3, 2.9], target: [0.05, 0.95, -1.1], fov: 38 },
+      { t: 0.55, pos: [0.12, 0.9, 0.45], target: [0.02, 0.75, -1.1], fov: 34 },
       { t: 1, pos: [0.3, 1.05, 0.55], target: [1.2, 1.25, -3.2], fov: 34 },
     ],
-    focus: [[0, [0.05, 0.9, -1.0]], [0.62, [0.02, 0.82, -1.0]], [0.85, [2.4, 1.2, -7.5]]],
+    focus: [[0, [0.05, 0.95, -1.1]], [0.62, [0.02, 0.75, -1.1]], [0.85, [2.4, 1.2, -7.5]]],
     grade: { sepia: [[0, 0.75]] },
     cast: [
       {
         actor: 'petugas1980',
         anchor: 'chair',
-        scale: 1.02,
-        pose: 'sit',
+        scale: 1.1,
         expression: [[0, 'serious'], [0.5, 'sad']],
         right: [[0, 'chalk']],
         left: [[0, 'holdBoard']],
@@ -471,8 +460,8 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'STASIUN GARUT', year: '1982' }]],
     aperture: [[0, 0.45]],
     camera: [
-      { t: 0, pos: [-0.55, 1.7, 3.6], target: [-0.75, 1.45, -1.8], fov: 44 },
-      { t: 0.4, pos: [0.3, 1.65, 3.6], target: [0.1, 1.5, -1.4], fov: 38 },
+      { t: 0, pos: [-0.55, 1.35, 3.6], target: [-0.75, 1.15, -1.8], fov: 44 },
+      { t: 0.4, pos: [0.3, 1.35, 3.6], target: [0.1, 1.3, -1.4], fov: 38 },
       { t: 0.7, pos: [0.8, 1.75, 4.1], target: [1.2, 1.3, -8], fov: 36 },
       { t: 1, pos: [0.9, 1.75, 4.4], target: [1.6, 1.15, -40], fov: 34 },
     ],
@@ -481,16 +470,15 @@ export const SHOTS: readonly Shot[] = [
       {
         actor: 'petugas1982',
         anchor: 'petugas',
-        scale: 1.03,
-        pose: 'stand',
+        scale: 1.1,
         expression: [[0, 'serious'], [0.4, 'sad']],
         left: [[0, 'reachUp'], [0.42, 'reachUp'], [0.52, 'side']],
         right: [[0, 'side']],
         turn: [[0, 0.3], [0.5, 0]],
       },
-      { actor: 'penumpangPria', anchor: 'diam1', scale: 1.02, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, 0.5]] },
-      { actor: 'ibuBakul', anchor: 'diam2', scale: 0.97, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'side']], turn: [[0, 0.6]] },
-      { actor: 'bapakPeci', anchor: 'diam3', scale: 1.0, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.4]], nod: [[0, 0.5]] },
+      { actor: 'penumpangPria', anchor: 'diam1', scale: 1.1, expression: [[0, 'sad']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, 0.5]] },
+      { actor: 'ibuBakul', anchor: 'diam2', scale: 1.05, expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'side']], turn: [[0, 0.6]] },
+      { actor: 'bapakPeci', anchor: 'diam3', scale: 1.1, expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.4]], nod: [[0, 0.5]] },
     ],
   },
   // 10 — Today, bright noon: sepia match-cut to colour; ±50 m building, wild grass and murals; crane down.
@@ -504,14 +492,13 @@ export const SHOTS: readonly Shot[] = [
     aperture: [[0, 0.3], [1, 0.45]],
     camera: [
       { t: 0, pos: [0.0, 6.2, 9.5], target: [0.0, 2.0, -4], fov: 46 },
-      { t: 0.6, pos: [0.3, 2.4, 5.6], target: [0.0, 1.6, -3.5], fov: 42 },
-      { t: 1, pos: [0.4, 1.45, 3.7], target: [0.0, 1.35, -3], fov: 38 },
+      { t: 0.6, pos: [0.3, 2.2, 5.6], target: [0.0, 1.3, -3.5], fov: 42 },
+      { t: 1, pos: [0.4, 1.25, 3.7], target: [0.0, 1.1, -3], fov: 38 },
     ],
     grade: { sepia: [[0, 0.92], [0.04, 0.92], [0.22, 0]] },
     cast: [
       dinda({
         anchor: 'dindaCenter',
-        pose: 'stand',
         expression: [[0, 'wonder'], [0.5, 'warm']],
         right: [[0, 'side'], [0.2, 'pointSide'], [0.62, 'pointSide'], [0.72, 'palm']],
         left: [[0, 'side'], [0.24, 'spread'], [0.66, 'spread'], [0.76, 'strap']],
@@ -519,7 +506,7 @@ export const SHOTS: readonly Shot[] = [
       }),
     ],
   },
-  // 11 — Right side: Dinda crouches and touches "Station Tjikadjang"; a cat on the threshold; rack focus.
+  // 11 — Right side: Dinda traces "Station Tjikadjang" at hand height; a cat on the threshold; rack focus.
   {
     id: 'ukiran-tjikadjang',
     from: 2850,
@@ -531,22 +518,21 @@ export const SHOTS: readonly Shot[] = [
     // Medium shot: the tail of the carving ("…djang"), Dinda's hand on it AND her shoulder/head,
     // then push in and rack focus from the stone to her face.
     camera: [
-      { t: 0, pos: [18.1, 0.95, -0.9], target: [18.08, 0.86, -3.6], fov: 36 },
+      { t: 0, pos: [18.1, 0.95, -0.9], target: [18.08, 0.9, -3.6], fov: 36 },
       { t: 0.5, pos: [18.12, 1.0, -1.15], target: [18.12, 0.95, -3.55], fov: 35 },
-      { t: 1, pos: [18.2, 1.1, -1.6], target: [18.25, 1.2, -3.45], fov: 34 },
+      { t: 1, pos: [18.2, 1.15, -1.6], target: [18.25, 1.15, -3.45], fov: 34 },
     ],
-    focus: [[0, [17.95, 0.92, -3.68]], [0.45, [17.95, 0.92, -3.68]], [0.72, [18.3, 1.25, -3.45]]],
+    focus: [[0, [17.95, 0.92, -3.68]], [0.45, [17.95, 0.92, -3.68]], [0.72, [18.3, 1.26, -3.45]]],
     grade: COLOUR,
     cast: [
       dinda({
-        anchor: 'dindaCrouch',
-        pose: 'crouch',
+        anchor: 'dindaTrace',
         expression: [[0, 'thinking'], [0.6, 'warm']],
-        right: [[0, 'traceLow']],
-        left: [[0, 'knee']],
+        right: [[0, 'trace']],
+        left: [[0, 'strap']],
         turn: [[0, -0.55], [0.65, -0.1]],
       }),
-      { actor: 'kucing', anchor: 'kucing', scale: 1, pose: 'sit', expression: [[0, 'neutral']] },
+      { actor: 'kucing', anchor: 'kucing', scale: 1, expression: [[0, 'neutral']] },
     ],
   },
   // 12 — Garut 2022, bright: route map, ticket in hand, modern train arrives.
@@ -559,16 +545,15 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'STASIUN GARUT', year: '2022' }]],
     aperture: [[0, 0.4]],
     camera: [
-      { t: 0, pos: [-0.55, 1.6, 2.9], target: [-0.9, 1.6, -2.0], fov: 40 },
-      { t: 0.45, pos: [-1.35, 1.8, 0.4], target: [-1.55, 1.8, -2.5], fov: 34 },
-      { t: 0.7, pos: [0.2, 1.8, 3.6], target: [2.5, 1.5, 0.9], fov: 40 },
+      { t: 0, pos: [-0.55, 1.3, 2.9], target: [-0.9, 1.25, -2.0], fov: 40 },
+      { t: 0.45, pos: [-1.35, 1.35, 0.4], target: [-1.55, 1.3, -2.5], fov: 34 },
+      { t: 0.7, pos: [0.2, 1.4, 3.6], target: [2.5, 1.3, 0.9], fov: 40 },
       { t: 1, pos: [2.2, 1.7, 4.4], target: [5.5, 1.4, 0.9], fov: 40 },
     ],
     grade: COLOUR,
     cast: [
       dinda({
         anchor: 'dinda',
-        pose: 'stand',
         expression: [[0, 'warm'], [0.35, 'neutral'], [0.6, 'warm']],
         // Points only while the wide frame holds her shoulder; arm rests during the push-in to the map.
         right: [[0, 'side'], [0.05, 'point'], [0.13, 'point'], [0.2, 'side'], [0.55, 'side'], [0.62, 'palm'], [0.76, 'palm'], [0.85, 'side']],
@@ -577,9 +562,9 @@ export const SHOTS: readonly Shot[] = [
         bodyProp: 'backpack',
         turn: [[0, -0.4], [0.3, 0]],
       }),
-      { actor: 'penumpangModern', anchor: 'p1', scale: 1.03, pose: 'stand', expression: [[0, 'neutral']], right: [[0, 'ticket']], left: [[0, 'side']], rightProp: 'phone', turn: [[0, 0.6]] },
-      { actor: 'penumpangModern2', anchor: 'p2', scale: 0.97, pose: 'stand', expression: [[0, 'warm']], right: [[0, 'side']], left: [[0, 'strap']], bodyProp: 'backpack', turn: [[0, 0.5]] },
-      { actor: 'anakModern', anchor: 'p3', scale: 0.7, pose: 'stand', expression: [[0, 'wonder']], right: [[0, 'wave']], left: [[0, 'side']], turn: [[0, 0.7]] },
+      { actor: 'penumpangModern', anchor: 'p1', scale: 1.1, expression: [[0, 'neutral']], right: [[0, 'ticket']], left: [[0, 'side']], rightProp: 'phone', turn: [[0, 0.6]] },
+      { actor: 'penumpangModern2', anchor: 'p2', scale: 1.05, expression: [[0, 'warm']], right: [[0, 'side']], left: [[0, 'strap']], bodyProp: 'backpack', turn: [[0, 0.5]] },
+      { actor: 'anakModern', anchor: 'p3', scale: 0.82, expression: [[0, 'wonder']], right: [[0, 'wave']], left: [[0, 'side']], turn: [[0, 0.7]] },
     ],
   },
   // 13 — Back to the rear door at dusk: hands in jacket pockets, years glow, "?" appears; dolly zoom.
@@ -592,14 +577,13 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'STASIUN CIKAJANG', year: '20??' }]],
     aperture: [[0, 0.45], [1, 0.6]],
     camera: [
-      { t: 0, pos: [0.55, 1.4, 6.0], target: [0.5, 1.45, -0.8], fov: 26 },
-      { t: 1, pos: [0.52, 2.0, 2.1], target: [0.5, 2.25, -0.8], fov: 56 },
+      { t: 0, pos: [0.55, 0.95, 6.0], target: [0.5, 0.95, -0.8], fov: 26 },
+      { t: 1, pos: [0.52, 1.45, 2.1], target: [0.5, 1.65, -0.8], fov: 56 },
     ],
     grade: { sepia: [[0, 0]], tone: 0.6 },
     cast: [
       dinda({
         anchor: 'dindaCenter',
-        pose: 'stand',
         expression: [[0, 'thinking'], [0.55, 'wonder']],
         right: [[0, 'pocket']],
         left: [[0, 'pocket']],

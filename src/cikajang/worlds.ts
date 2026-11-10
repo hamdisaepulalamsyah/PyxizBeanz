@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import { PALETTE, type WorldFrame, WorldKit, mulberry32 } from '../persis/worlds';
 import type { Vec3, WorldId } from './story';
 import { clamp01, easeInCubic, easeOutCubic, keyed, lerp, smoothstep } from './story';
-import { DESK_HEIGHT, SEAT_HEIGHT } from './toon';
+import { DESK_LINE } from './toon';
+
+/** Bench / chair seat height; bean-head busts sit with their base on it. */
+const SEAT_HEIGHT = 0.46;
+/** Standard desk height (the station master's bust is raised so the desk line meets his waist). */
+const DESK_TOP = 0.76;
 
 /**
  * Three.js worlds for "Sejarah Cikajang, Garut" (11 sets for 13 shots) plus the
@@ -644,7 +649,7 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
   }
 
   // Carved stone plaque "1930 – 1982" beside the door, at Dinda's hand height.
-  const plaquePos: Vec3 = [-0.12, 1.08, -0.88];
+  const plaquePos: Vec3 = [-0.12, 0.6, -0.88];
   kit.box(g, [0.78, 0.36, 0.05], [plaquePos[0], plaquePos[1], plaquePos[2] - 0.01], '#8a7a62', { ink: 20 });
   const carve = (glow: boolean): Paint => (c, w, h) => {
     if (!glow) {
@@ -686,8 +691,8 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
     c.fillText('?', w / 2, h / 2 + h * 0.04);
   });
   const qMat = kit.track(new THREE.MeshBasicMaterial({ map: qTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
-  const question = kit.mesh(g, new THREE.PlaneGeometry(0.75, 0.75), qMat, [0.5, 2.32, -0.7], { ink: false, shadow: false });
-  const qGlow = kit.glow(g, '#ffb84a', 2.2, [0.5, 2.32, -0.66], 0);
+  const question = kit.mesh(g, new THREE.PlaneGeometry(0.75, 0.75), qMat, [0.5, 1.78, -0.7], { ink: false, shadow: false });
+  const qGlow = kit.glow(g, '#ffb84a', 2.2, [0.5, 1.78, -0.66], 0);
 
   const swing = lantern(kit, g, [-1.1, 4.0, -0.35], 0.75, 3, 4.5);
   // Dry leaves: some flat on the cement, some tumbling through the foreground.
@@ -744,7 +749,7 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
       const pop = finale ? 1 + 0.25 * Math.exp(-Math.max(0, progress - 0.56) * 30) * Math.sin(Math.max(0, progress - 0.5) * 60) : 1;
       qMat.opacity = q;
       question.scale.setScalar(Math.max(0.01, q * pop));
-      question.position.y = 2.32 + Math.sin(frame * 0.06) * 0.03;
+      question.position.y = 1.78 + Math.sin(frame * 0.06) * 0.03;
       qGlow.material.opacity = q * (0.6 + 0.2 * Math.sin(frame * 0.1));
     },
   };
@@ -767,7 +772,7 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   kit.box(g, [22, 0.1, 3.9], [0, 3.75, -2.9], '#6a5a4a', { ink: 20, rot: [0.05, 0, 0] });
 
   // The elevation sign, chunky 3D cartoon board.
-  carvedSign(kit, g, ['CIKAJANG', '1.246 MDPL'], [1.4, 0.68], [-1.35, 2.08, -1.75], 0.18);
+  carvedSign(kit, g, ['CIKAJANG', '1.246 MDPL'], [1.4, 0.68], [-1.05, 1.62, -1.8], 0.18);
 
   mountains(kit, g, [
     { x: -6, z: -80, r: 40, h: 34, color: '#56705a' },
@@ -865,7 +870,7 @@ function buildLadang(kit: WorldKit): WorldScene {
       fog(frame);
       steamUpdate(breath, localFrame, 9, 40, (birth) => {
         const alt = Math.floor(birth / 9) % 2 === 0;
-        return alt ? v3(-4.3 + farmerX(clamp01(birth / 299)) + 0.1, 1.42, 0.45) : v3(-0.95, 1.22, -1.3);
+        return alt ? v3(-4.3 + farmerX(clamp01(birth / 299)) + 0.1, 0.72, 0.45) : v3(-0.95, 1.08, -1.3);
       }, { rise: 0.05, drift: 0.008, grow: 0.012, opacity: 0.35 });
       void progress;
     },
@@ -882,11 +887,15 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   kit.shaft(g, [-1.9, 1.9, -3.0], [-0.4, 0.3, -0.6], 0.9, '#ffe6b0', 0.22);
   const motes = kit.motes(g, { from: [-1.9, 1.9, -3.0], to: [-0.4, 0.3, -0.6], radius: 0.9, count: 160, color: '#fff0c8', seed: 62 });
 
-  const s = 1.05;
-  const deskTop = DESK_HEIGHT * s;
+  const s = 1.1;
+  const deskTop = DESK_TOP;
+  /** Bust base raised so the desk line on the canvas meets the desk top. */
+  const deskBase = deskTop - DESK_LINE * s;
   // Open-frame desk (legs visible underneath) whose back edge sits just in front of the seated billboard.
   table(kit, g, [0, 0, -0.8], [1.6, deskTop, 0.8], '#6a4228');
-  chair(kit, g, [0, 0, -1.5], SEAT_HEIGHT * s, '#5a3820');
+  // Front modesty panel hides the raised bust base, as in the Persis study desk.
+  kit.box(g, [1.6, deskTop - 0.12, 0.04], [0, (deskTop - 0.12) / 2 + 0.06, -0.42], '#5a3820', { ink: 20 });
+  chair(kit, g, [0, 0, -1.55], deskBase, '#5a3820');
   // Desk-top props (no pens here: the only pen is in the station master's hand).
   const cal = new THREE.Group();
   cal.position.set(-0.66, deskTop, -0.48);
@@ -914,7 +923,7 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   return {
     id: 'office1930',
     group: g,
-    anchors: { desk: v3(0, 0, -1.24), corner: v3(2.4, 0, -2.5) },
+    anchors: { desk: v3(0, deskBase, -1.24), corner: v3(2.4, SEAT_HEIGHT, -2.66) },
     background: new THREE.Color('#2a2018'),
     fog: new THREE.Fog('#3a2c20', 12, 40),
     update: ({ frame }) => {
@@ -939,9 +948,9 @@ function buildCibatu(kit: WorldKit): WorldScene {
   kit.label(g, ['TJIBATOE'], [2.4, 0.42], [1.5, 3.6, -4.74], { bg: '#efe3c4', fg: '#1d2a4a', font: '800 {size}px Georgia, serif', border: '#1d2a4a' });
   for (let x = -12; x <= 16; x += 4) for (const z of [-0.9, -4.0]) kit.cyl(g, 0.07, 0.08, 3.2, [x, 0.45 + 1.6, z], '#2c3440', { seg: 10 });
   kit.box(g, [30, 0.1, 4.0], [2, 3.7, -2.45], '#5a4a3a', { ink: 20 });
-  kit.cyl(g, 0.012, 0.012, 0.22, [0.5, 3.55, -2.0], PALETTE.ink, { seg: 4, ink: false });
-  const tick = clock(kit, g, [0.5, 3.2, -2.0], 0.3, 6, 4, '06.04');
-  kit.label(g, ['06.04  ➜  GAROET'], [1.2, 0.22], [0.5, 2.76, -2.0], { bg: '#1d2a3a', fg: '#f6e6b0', font: '800 {size}px Georgia, serif' });
+  kit.cyl(g, 0.012, 0.012, 0.6, [0.5, 3.4, -2.0], PALETTE.ink, { seg: 4, ink: false });
+  const tick = clock(kit, g, [0.5, 2.8, -2.0], 0.3, 6, 4, '06.04');
+  kit.label(g, ['06.04  ➜  GAROET'], [1.2, 0.22], [0.5, 2.36, -2.0], { bg: '#1d2a3a', fg: '#f6e6b0', font: '800 {size}px Georgia, serif' });
 
   const loco = steamLoco(kit, g);
   const coach1 = carriage(kit, g, '#5a3a2a');
@@ -1025,7 +1034,7 @@ function buildCarriage(kit: WorldKit): WorldScene {
   return {
     id: 'carriage',
     group: g,
-    anchors: { seat1: v3(-4.3, 0, -0.78), seat2: v3(-3.0, 0, -0.78), seat3: v3(-1.6, 0, -0.78), seat4: v3(-0.35, 0, -0.62), seat5: v3(1.4, 0, -0.78), seat6: v3(2.9, 0, -0.78) },
+    anchors: { seat1: v3(-4.3, SEAT_HEIGHT, -1.0), seat2: v3(-3.0, SEAT_HEIGHT, -1.0), seat3: v3(-1.6, SEAT_HEIGHT, -1.0), seat4: v3(-0.35, 0, -0.62), seat5: v3(1.4, SEAT_HEIGHT, -1.0), seat6: v3(2.9, SEAT_HEIGHT, -1.0) },
     background: new THREE.Color('#3a2a1e'),
     fog: new THREE.Fog('#6a5440', 10, 40),
     update: ({ frame }) => {
@@ -1051,7 +1060,7 @@ function buildGarut1935(kit: WorldKit): WorldScene {
   for (const x of [-10, -6.5, 1.5]) door(kit, g, x, -4.6, 1.2, 2.6, '#5a4028', 0.45);
   kit.label(g, ['GAROET'], [2.0, 0.42], [-4.5, 3.4, -4.54], { bg: '#efe3c4', fg: '#1d2a4a', font: '800 {size}px Georgia, serif', border: '#1d2a4a' });
   // Timetable board: "5x" daily Tjibatoe–Garoet.
-  const board = signBoard(kit, g, ['DIENSTREGELING 1935', 'TJIBATOE — GAROET', 'SETIAP HARI'], [1.5, 1.0], [-1.55, 2.05, -2.75], { bg: '#1f2a24', fg: '#f2ead0', border: '#5a3a24' });
+  const board = signBoard(kit, g, ['DIENSTREGELING 1935', 'TJIBATOE — GAROET', 'SETIAP HARI'], [1.5, 1.0], [-1.4, 1.35, -2.75], { bg: '#1f2a24', fg: '#f2ead0', border: '#5a3a24' });
   kit.label(board, ['5x'], [0.5, 0.36], [0.48, -0.26, 0.03], { bg: '#f6c453', fg: '#2a1a10', font: '800 {size}px Georgia, serif' });
   // 1947 repair site further down the line.
   for (let i = 0; i < 6; i++) kit.box(g, [0.22, 0.12, 2.0], [10.6 + (i % 2) * 0.1, 0.06 + Math.floor(i / 2) * 0.12, -1.0 - (i % 2) * 0.05], '#5a3e28', { ink: 20, rot: [0, Math.PI / 2, 0] });
@@ -1096,7 +1105,7 @@ function buildOffice1980(kit: WorldKit): WorldScene {
   loco.group.rotation.y = 0.15;
   kit.backdrop(g, [200, 70], [0, 20, -60], sky({ stops: [[0, '#5a5a6a'], [0.6, '#9a9488'], [1, '#6a6458']], ridges: CIKURAY_RIDGES('#4a5048', '#3e443c'), seed: 10 }), 4);
   // Furniture.
-  chair(kit, g, [0, 0, -1.2], SEAT_HEIGHT * 1.02, '#4a3a2a');
+  chair(kit, g, [0, 0, -1.2], SEAT_HEIGHT, '#4a3a2a');
   table(kit, g, [-1.4, 0, -1.6], [1.0, 0.76, 0.6], '#5a4a36');
   for (let i = 0; i < 4; i++) kit.box(g, [0.3, 0.04, 0.22], [-1.5 + (i % 2) * 0.1, 0.78 + i * 0.04, -1.6], '#d8d0b8', { ink: 10 });
   kit.label(g, ['PJKA', 'PERUSAHAAN JAWATAN KERETA API'], [1.2, 0.5], [-1.5, 2.1, -2.58], { bg: '#e6dcc0', fg: '#2a3a5a', border: '#2a3a5a', font: '800 {size}px Arial, sans-serif' });
@@ -1122,7 +1131,7 @@ function buildOffice1980(kit: WorldKit): WorldScene {
   return {
     id: 'office1980',
     group: g,
-    anchors: { chair: v3(0, 0, -0.92) },
+    anchors: { chair: v3(0, SEAT_HEIGHT, -1.12) },
     background: new THREE.Color('#2a2c26'),
     fog: new THREE.Fog('#3a3c34', 14, 60),
     update: ({ frame }) => {
@@ -1147,10 +1156,10 @@ function buildGarut1982(kit: WorldKit): WorldScene {
   for (let z = 2; z >= -20; z -= 4) kit.cyl(g, 0.07, 0.08, 3.1, [-4.8, 0.45 + 1.55, z], '#3a3a3a', { seg: 10 });
   kit.box(g, [3, 0.1, 24], [-5, 3.6, -9], '#5a5048', { ink: 20 });
   // Pole + the "DITUTUP" sign, just hung and still swinging.
-  kit.cyl(g, 0.05, 0.06, 1.9, [0.42, 0.45 + 0.95, -1.25], '#3a3a3a', { seg: 8 });
-  kit.box(g, [0.5, 0.05, 0.05], [0.3, 0.45 + 1.78, -1.25], '#3a3a3a');
+  kit.cyl(g, 0.05, 0.06, 1.6, [0.42, 0.45 + 0.8, -1.25], '#3a3a3a', { seg: 8 });
+  kit.box(g, [0.5, 0.05, 0.05], [0.3, 0.45 + 1.49, -1.25], '#3a3a3a');
   const pivot = new THREE.Group();
-  pivot.position.set(0.3, 0.45 + 1.75, -1.22);
+  pivot.position.set(0.3, 0.45 + 1.46, -1.22);
   g.add(pivot);
   kit.cyl(pivot, 0.004, 0.004, 0.2, [-0.22, -0.1, 0], PALETTE.ink, { seg: 4, ink: false });
   kit.cyl(pivot, 0.004, 0.004, 0.2, [0.22, -0.1, 0], PALETTE.ink, { seg: 4, ink: false });
@@ -1316,7 +1325,7 @@ function buildCikajangToday(kit: WorldKit): WorldScene {
   return {
     id: 'cikajangToday',
     group: g,
-    anchors: { dindaCenter: v3(0, 0.35, -2.4), dindaCrouch: v3(18.3, 0.35, -3.42), kucing: v3(19.42, 0.35, -3.52) },
+    anchors: { dindaCenter: v3(0, 0.35, -2.4), dindaTrace: v3(18.3, 0.35, -3.42), kucing: v3(19.42, 0.35, -3.52) },
     background: new THREE.Color('#9cc8ec'),
     fog: new THREE.Fog('#b8d4e4', 30, 140),
     update: ({ frame }) => {
@@ -1408,12 +1417,12 @@ function buildGarut2022(kit: WorldKit): WorldScene {
     c.fillText('rencana reaktivasi', 700, 470);
   });
   const mapG = new THREE.Group();
-  mapG.position.set(-1.55, 1.85, -2.5);
+  mapG.position.set(-1.55, 1.3, -2.5);
   mapG.rotation.y = 0.12;
   g.add(mapG);
   kit.box(mapG, [1.72, 1.0, 0.06], [0, 0, -0.035], '#3a4a5a', { ink: 20 });
   kit.mesh(mapG, new THREE.PlaneGeometry(1.6, 0.9), kit.toon('#ffffff', { map }), [0, 0, 0.0], { ink: false, shadow: false });
-  for (const s of [-1, 1]) kit.cyl(g, 0.04, 0.04, 1.4, [-1.55 + s * 0.7, 0.45 + 0.7, -2.6], '#3a4a5a', { seg: 8 });
+  for (const s of [-1, 1]) kit.cyl(g, 0.04, 0.04, 0.85, [-1.55 + s * 0.7, 0.45 + 0.42, -2.6], '#3a4a5a', { seg: 8 });
   const train = modernTrain(kit, g);
   const xAt = (p: number): number => lerp(40, 1.2, easeOutCubic(smoothstep(0.35, 0.95, p)));
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#3a7ad0'], [0.55, '#8cc0ec'], [0.8, '#d0e6f4'], [1, '#a8c0b0']], clouds: { color: 'rgba(255,255,255,0.9)', count: 24, y: 0.3 }, ridges: CIKURAY_RIDGES('#5a8a72', '#4e7e5e'), seed: 13 }), 3);

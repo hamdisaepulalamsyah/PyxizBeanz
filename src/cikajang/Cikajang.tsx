@@ -98,7 +98,7 @@ class StageManager {
       if (!anchor) throw new Error(`World "${shot.world}" has no anchor "${member.anchor}"`);
       const actor = createToonActor(
         member.actor,
-        { pose: member.pose, leftProp: member.leftProp ?? 'none', rightProp: member.rightProp ?? 'none', bodyProp: member.bodyProp ?? 'none' },
+        { leftProp: member.leftProp ?? 'none', rightProp: member.rightProp ?? 'none', bodyProp: member.bodyProp ?? 'none' },
         { gradientMap: this.kit.gradient, seed: index * 13 + i * 5 + 1 },
       );
       actor.mesh.position.copy(anchor);
