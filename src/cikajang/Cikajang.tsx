@@ -138,7 +138,7 @@ const CikajangScene: React.FC = () => {
   const manager = useMemo(() => new StageManager(), []);
   const film = useMemo(() => new FilmPipeline(width, height), [width, height]);
   const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35, roll: 0, focus: 5 }), []);
-  const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0, sepia: 0, grey: 0 });
+  const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0, sepia: 0, grey: 0, tone: 0.4 });
 
   useLayoutEffect(() => {
     scene.add(manager.root);
@@ -204,7 +204,7 @@ const CikajangScene: React.FC = () => {
     }
 
     const grade = gradeAt(frame);
-    filmParams.current = { focusDistance: sample.focus, aperture: apertureAt(frame), frame, dip: cutDipAt(frame), sepia: grade.sepia, grey: grade.grey };
+    filmParams.current = { focusDistance: sample.focus, aperture: apertureAt(frame), frame, dip: cutDipAt(frame), sepia: grade.sepia, grey: grade.grey, tone: grade.tone };
   }, [frame, fps, camera, scene, manager, sample]);
 
   // Priority 1 takes over rendering from R3F so the film pass runs last.
@@ -448,7 +448,7 @@ export const Cikajang: React.FC<CikajangProps> = ({ words, sentences }) => {
       <HookTitle />
       <ShotChip />
       <Captions pages={pages} words={words} />
-      <Audio src={staticFile('voice.wav')} />
+      <Audio src={staticFile('cikajang/voice.wav')} />
     </AbsoluteFill>
   );
 };

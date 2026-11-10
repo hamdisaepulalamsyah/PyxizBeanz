@@ -65,7 +65,7 @@ async function fetchJson(name: string, signal: AbortSignal, optional: boolean): 
 /** Loads ElevenLabs timings from public/ before rendering so props stay serialisable. */
 export const calculatePersisMetadata: CalculateMetadataFunction<PersisProps> = async ({ props, abortSignal }) => {
   if (props.words.length > 0) return { props, durationInFrames: PERSIS_DURATION_IN_FRAMES };
-  const [rawWords, rawSentences] = await Promise.all([fetchJson('words.json', abortSignal, false), fetchJson('sentences.json', abortSignal, true)]);
+  const [rawWords, rawSentences] = await Promise.all([fetchJson('persis/words.json', abortSignal, false), fetchJson('persis/sentences.json', abortSignal, true)]);
   const words = parseWords(rawWords, PERSIS_FPS);
   const sentences = parseSentences(rawSentences, PERSIS_FPS, words);
   return { props: { words, sentences }, durationInFrames: PERSIS_DURATION_IN_FRAMES };
@@ -447,8 +447,8 @@ export const Persis: React.FC<PersisProps> = ({ words, sentences }) => {
       <HookTitle />
       <ShotChip />
       <Captions pages={pages} words={words} />
-      <Audio src={staticFile('voice.wav')} />
-      <Audio src={staticFile('sfx.wav')} />
+      <Audio src={staticFile('persis/voice.wav')} />
+      <Audio src={staticFile('persis/sfx.wav')} />
     </AbsoluteFill>
   );
 };

@@ -60,6 +60,8 @@ interface HumanLook {
   mustache: boolean;
   glasses: boolean;
   packColor: string;
+  /** Upper lashes (female characters). */
+  lashes: boolean;
 }
 
 interface CritterLook {
@@ -82,6 +84,7 @@ const human = (l: Partial<HumanLook> & Pick<HumanLook, 'skin' | 'headwear' | 'to
   mustache: false,
   glasses: false,
   packColor: '#c4553d',
+  lashes: l.headwear === 'hijab' || l.headwear === 'hairBun',
   ...l,
 });
 
@@ -156,7 +159,9 @@ function blinkAt(frame: number, seed: number): number {
   const k = Math.floor(frame / period);
   const t0 = k * period + 20 + hash01(seed, k) * 70;
   const d = frame - t0;
-  return d >= 0 && d < 7 ? Math.sin((d / 7) * Math.PI) : 0;
+  const one = (x: number): number => (x >= 0 && x < 7 ? Math.sin((x / 7) * Math.PI) : 0);
+  // Roughly one blink in four is a quick double blink.
+  return Math.max(one(d), hash01(seed + 11, k) > 0.75 ? one(d - 9) : 0);
 }
 
 // ── Skeleton ────────────────────────────────────────────────────────────────
@@ -319,6 +324,8 @@ function handTarget(pose: ArmPose, side: 0 | 1, c: ArmCtx): Pt {
       return rel(66, -168);
     case 'wave':
       return rel(120 + Math.sin(frame * 0.35) * 16, -118);
+    case 'palm':
+      return rel(116 + Math.sin(frame * 0.07 + side) * 6, 40 + Math.sin(frame * 0.05) * 5);
   }
 }
 
@@ -382,6 +389,21 @@ function limb(ctx: CanvasRenderingContext2D, pts: readonly Pt[], width: number, 
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.stroke();
+  // Form shading: key light from the upper left, so the right flank falls into shade.
+  ctx.save();
+  ctx.translate(width * 0.2, width * 0.06);
+  trace();
+  ctx.strokeStyle = 'rgba(40, 20, 50, 0.22)';
+  ctx.lineWidth = width * 0.42;
+  ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(-width * 0.22, -width * 0.04);
+  trace();
+  ctx.strokeStyle = 'rgba(255, 236, 200, 0.18)';
+  ctx.lineWidth = width * 0.22;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function ellipse(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, rot = 0): void {
@@ -522,17 +544,48 @@ function paintTorso(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton
   ctx.clip();
   const top = sk.shY - 10;
   const bottom = sk.hipY + 20;
-  // Soft side shading.
+  // Soft form shading: warm light upper-left, cool shade lower-right.
+  const grad = ctx.createLinearGradient(CX - 120, top, CX + 120, bottom);
+  grad.addColorStop(0, 'rgba(255, 238, 205, 0.22)');
+  grad.addColorStop(0.45, 'rgba(255, 238, 205, 0)');
+  grad.addColorStop(1, 'rgba(36, 20, 54, 0.32)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(CX - 140, top, 280, bottom - top);
   ctx.fillStyle = look.topShade;
-  ctx.globalAlpha = 0.55;
-  ctx.fillRect(CX + 40, top, 80, bottom - top);
+  ctx.globalAlpha = 0.4;
+  ctx.fillRect(CX + 58, top, 80, bottom - top);
   ctx.globalAlpha = 1;
+  // Ambient occlusion under the chin / hijab drape.
+  const ao = ctx.createLinearGradient(0, top, 0, top + 70);
+  ao.addColorStop(0, 'rgba(30, 16, 30, 0.35)');
+  ao.addColorStop(1, 'rgba(30, 16, 30, 0)');
+  ctx.fillStyle = ao;
+  ctx.fillRect(CX - 140, top, 280, 70);
   ctx.strokeStyle = INK;
   ctx.lineWidth = 4;
   switch (look.top) {
     case 'jacket': {
+      // Denim twill texture.
+      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.lineWidth = 2;
+      for (let k = -300; k < 300; k += 7) {
+        ctx.beginPath();
+        ctx.moveTo(CX + k, top);
+        ctx.lineTo(CX + k + (bottom - top) * 0.6, bottom);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(20,30,60,0.12)';
+      for (let k = -297; k < 300; k += 11) {
+        ctx.beginPath();
+        ctx.moveTo(CX + k, top);
+        ctx.lineTo(CX + k + (bottom - top) * 0.6, bottom);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = INK;
       ctx.fillStyle = look.accent;
       ctx.fillRect(CX - 26, top, 52, bottom - top);
+      ctx.fillStyle = 'rgba(40,30,50,0.12)';
+      ctx.fillRect(CX + 6, top, 20, bottom - top);
       ctx.lineWidth = 5;
       for (const s of SIGN) {
         ctx.beginPath();
@@ -541,12 +594,26 @@ function paintTorso(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton
         ctx.stroke();
         ctx.strokeRect(CX + s * 58 - 20, sk.shY + 50, 40, 30);
         ctx.strokeRect(CX + s * 62 - 22, sk.hipY - 50, 44, 34);
+        // Copper rivet + yoke seam.
+        ctx.fillStyle = '#c98a3a';
+        ctx.beginPath();
+        ellipse(ctx, CX + s * 58, sk.shY + 58, 4, 4);
+        ctx.fill();
       }
       ctx.strokeStyle = '#e8c27a';
+      ctx.lineWidth = 3;
       ctx.setLineDash([6, 6]);
       ctx.beginPath();
       ctx.moveTo(CX - 110, sk.hipY - 4);
       ctx.lineTo(CX + 110, sk.hipY - 4);
+      ctx.moveTo(CX - 120, sk.shY + 36);
+      ctx.quadraticCurveTo(CX - 60, sk.shY + 46, CX - 30, sk.shY + 40);
+      ctx.moveTo(CX + 120, sk.shY + 36);
+      ctx.quadraticCurveTo(CX + 60, sk.shY + 46, CX + 30, sk.shY + 40);
+      for (const s of SIGN) {
+        ctx.moveTo(CX + s * 34, top + 10);
+        ctx.lineTo(CX + s * 38, bottom - 10);
+      }
       ctx.stroke();
       ctx.setLineDash([]);
       break;
@@ -636,7 +703,7 @@ function paintTorso(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton
   }
 }
 
-function paintHead(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton, face: Face, turn: number, blink: number, nod: number): void {
+function paintHead(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton, face: Face, turn: number, blink: number, nod: number, frame: number, seed: number): void {
   const hx = sk.headX + turn * 6;
   const hy = sk.headY;
   const fx = hx + turn * 26;
@@ -646,24 +713,69 @@ function paintHead(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton,
   outlined(ctx, () => roundRect(ctx, CX - 26, hy + 70, 52, sk.shY - hy - 60, 12), look.skinShade);
 
   if (hijab) {
-    // Hood and drape over the shoulders (drawn before the face oval).
+    // Hood and drape over the shoulders (drawn before the face oval), with warm folds.
+    const hc = look.headwearColor;
+    const hood = ctx.createRadialGradient(hx - 50, hy - 70, 10, hx, hy, 150);
+    hood.addColorStop(0, shade(hc, 0.22));
+    hood.addColorStop(0.55, hc);
+    hood.addColorStop(1, shade(hc, -0.22));
     outlined(ctx, () => {
       ellipse(ctx, hx, hy - 2, 122, 128);
-    }, look.headwearColor);
+    }, hc);
+    ctx.fillStyle = hood;
+    ctx.beginPath();
+    ellipse(ctx, hx, hy - 2, 118, 124);
+    ctx.fill();
+    const drape = ctx.createLinearGradient(CX - 130, hy + 40, CX + 130, sk.shY + 110);
+    drape.addColorStop(0, shade(hc, 0.14));
+    drape.addColorStop(0.5, hc);
+    drape.addColorStop(1, shade(hc, -0.26));
     outlined(ctx, () => {
       ctx.moveTo(hx - 104, hy + 40);
       ctx.quadraticCurveTo(CX - 128, sk.shY + 20, CX - 112, sk.shY + 86);
       ctx.quadraticCurveTo(CX, sk.shY + 120, CX + 112, sk.shY + 86);
       ctx.quadraticCurveTo(CX + 128, sk.shY + 20, hx + 104, hy + 40);
       ctx.closePath();
-    }, look.headwearColor);
-    ctx.strokeStyle = shade(look.headwearColor, -0.25);
+    }, hc);
+    ctx.fillStyle = drape;
+    ctx.beginPath();
+    ctx.moveTo(hx - 100, hy + 44);
+    ctx.quadraticCurveTo(CX - 122, sk.shY + 20, CX - 108, sk.shY + 82);
+    ctx.quadraticCurveTo(CX, sk.shY + 114, CX + 108, sk.shY + 82);
+    ctx.quadraticCurveTo(CX + 122, sk.shY + 20, hx + 100, hy + 44);
+    ctx.closePath();
+    ctx.fill();
+    // Fold lines.
+    ctx.strokeStyle = shade(hc, -0.3);
     ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(CX - 60, sk.shY + 60);
     ctx.quadraticCurveTo(CX, sk.shY + 86, CX + 60, sk.shY + 60);
+    ctx.moveTo(CX - 92, sk.shY + 10);
+    ctx.quadraticCurveTo(CX - 70, sk.shY + 50, CX - 82, sk.shY + 78);
+    ctx.moveTo(CX + 88, sk.shY + 4);
+    ctx.quadraticCurveTo(CX + 64, sk.shY + 46, CX + 78, sk.shY + 80);
+    ctx.moveTo(hx + 76, hy - 86);
+    ctx.quadraticCurveTo(hx + 104, hy - 30, hx + 98, hy + 30);
+    ctx.stroke();
+    ctx.strokeStyle = shade(hc, 0.3);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(hx - 80, hy - 84);
+    ctx.quadraticCurveTo(hx - 104, hy - 36, hx - 100, hy + 10);
     ctx.stroke();
     outlined(ctx, () => ellipse(ctx, fx * 0.4 + hx * 0.6, hy + 14, 86, 94), look.skin, 6);
+    // Soft shade where the hijab frames the face.
+    const rim = ctx.createRadialGradient(fx * 0.4 + hx * 0.6, hy + 14, 60, fx * 0.4 + hx * 0.6, hy + 14, 94);
+    rim.addColorStop(0, 'rgba(120,60,40,0)');
+    rim.addColorStop(1, 'rgba(120,60,40,0.28)');
+    ctx.fillStyle = rim;
+    ctx.beginPath();
+    ellipse(ctx, fx * 0.4 + hx * 0.6, hy + 14, 84, 92);
+    ctx.fill();
+    // Small brooch pin under the chin.
+    outlined(ctx, () => ellipse(ctx, CX, hy + 108, 7, 7), '#f2e6c8', 3);
   } else {
     // Ears then head.
     for (const s of SIGN) outlined(ctx, () => ellipse(ctx, hx + s * 102, hy + 14, 18, 26), look.skin, 6);
@@ -679,9 +791,12 @@ function paintHead(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton,
     ctx.fill();
   }
 
-  // Eyes.
+  // Eyes: idle saccades every ~1.5 s, catch-lights, lashes.
   const lid = clamp01(face.lid + blink);
   const look2 = face.lookY * 6 + nod * 5;
+  const sac = Math.floor(frame / 46);
+  const sx = (hash01(seed + 3, sac) - 0.5) * 5;
+  const sy = (hash01(seed + 5, sac) - 0.5) * 3;
   for (const s of SIGN) {
     const ex = fx + s * 38;
     const ey = hy + 10;
@@ -694,14 +809,38 @@ function paintHead(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton,
     ctx.strokeStyle = INK;
     ctx.stroke();
     if (open > 0.2) {
-      ctx.fillStyle = '#2a1a16';
+      const px = ex + turn * 6 + sx;
+      const py = ey + look2 + sy;
+      ctx.fillStyle = '#3a2216';
       ctx.beginPath();
-      ellipse(ctx, ex + turn * 6, ey + look2, 9, 10 * open);
+      ellipse(ctx, px, py, 10, 11 * open);
+      ctx.fill();
+      ctx.fillStyle = '#120a08';
+      ctx.beginPath();
+      ellipse(ctx, px, py + 1, 5.5, 6.5 * open);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ellipse(ctx, ex + turn * 6 - 3, ey + look2 - 4, 3, 3);
+      ellipse(ctx, px - 3.5, py - 4.5, 3.4, 3.4);
+      ellipse(ctx, px + 3.5, py + 3.5, 1.6, 1.6);
       ctx.fill();
+    }
+    // Upper lid line (heavier) + lashes.
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.ellipse(ex, ey, 17, 20 * Math.max(0.08, open), 0, Math.PI * 1.08, Math.PI * 1.92);
+    ctx.stroke();
+    if (look.lashes) {
+      ctx.lineWidth = 3.5;
+      const top = ey - 20 * Math.max(0.08, open);
+      ctx.beginPath();
+      ctx.moveTo(ex + s * 12, top + 4);
+      ctx.lineTo(ex + s * 22, top - 4);
+      ctx.moveTo(ex + s * 15, top + 8);
+      ctx.lineTo(ex + s * 25, top + 4);
+      ctx.stroke();
     }
     // Brows.
     const raise = face.browRaise * 10 + (s === 1 ? face.browAsym * 8 : -face.browAsym * 4);
@@ -849,7 +988,47 @@ function paintHeadwear(ctx: CanvasRenderingContext2D, look: HumanLook, hx: numbe
   }
 }
 
-function paintArm(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmSolve, pocket: boolean): void {
+/** Mitten hand: closed grip, pointing index finger, or open palm (oriented along the forearm). */
+function paintHand(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmSolve, shape: HandShape, s: number): void {
+  const [hx, hy] = arm.hand;
+  const ang = Math.atan2(arm.hand[1] - arm.elbow[1], arm.hand[0] - arm.elbow[0]);
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(ang);
+  if (shape === 'point') {
+    outlined(ctx, () => roundRect(ctx, 6, -6, 34, 12, 6), look.skin, 5);
+    outlined(ctx, () => ellipse(ctx, 0, 0, 22, 20), look.skin, 6);
+    outlined(ctx, () => ellipse(ctx, 2, s * -14, 10, 7, -0.4 * s), look.skin, 4);
+  } else if (shape === 'palm') {
+    for (let k = 0; k < 4; k++) {
+      const a = (k - 1.5) * 0.26;
+      ctx.save();
+      ctx.rotate(a);
+      outlined(ctx, () => roundRect(ctx, 8, -5, 26 - Math.abs(k - 1.5) * 4, 10, 5), look.skin, 4);
+      ctx.restore();
+    }
+    outlined(ctx, () => ellipse(ctx, 2, 0, 20, 22), look.skin, 6);
+    outlined(ctx, () => ellipse(ctx, 4, s * -20, 12, 6, -0.7 * s), look.skin, 4);
+    ctx.strokeStyle = look.skinShade;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(2, 0, 10, -1, 1);
+    ctx.stroke();
+  } else {
+    outlined(ctx, () => ellipse(ctx, 0, 0, 21, 21), look.skin, 6);
+    ctx.strokeStyle = look.skinShade;
+    ctx.lineWidth = 3;
+    for (const k of [-6, 2, 10]) {
+      ctx.beginPath();
+      ctx.moveTo(10, k - 3);
+      ctx.lineTo(16, k - 3);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function paintArm(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmSolve, pocket: boolean, shape: HandShape, s: number): void {
   const sleeve = look.top === 'kaos' || look.top === 'polo' ? 'short' : 'long';
   const elbowMid: Pt = [lerp(arm.shoulder[0], arm.elbow[0], 0.55), lerp(arm.shoulder[1], arm.elbow[1], 0.55)];
   if (sleeve === 'long') {
@@ -865,7 +1044,7 @@ function paintArm(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmSolve,
     limb(ctx, [arm.shoulder, arm.elbow, arm.hand], 32, look.skin);
     limb(ctx, [arm.shoulder, elbowMid], 44, look.topColor);
   }
-  outlined(ctx, () => ellipse(ctx, arm.hand[0], arm.hand[1], 21, 21), look.skin, 6);
+  paintHand(ctx, look, arm, pocket ? 'fist' : shape, s);
   if (pocket) {
     // Hand tucked in the jacket pocket: the pocket welt covers the fingers.
     outlined(ctx, () => roundRect(ctx, arm.hand[0] - 26, arm.hand[1] - 2, 52, 26, 6), look.topColor, 5);
@@ -948,11 +1127,33 @@ function paintHandProp(ctx: CanvasRenderingContext2D, prop: HandProp, arm: ArmSo
 }
 
 function paintBackpackBack(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton): void {
-  outlined(ctx, () => roundRect(ctx, CX - 104, sk.shY - 20, 208, sk.hipY - sk.shY - 10, 30), look.packColor);
+  const x = CX - 104;
+  const y = sk.shY - 20;
+  const w = 208;
+  const h = sk.hipY - sk.shY - 10;
+  // Top grab loop peeking above the shoulders.
+  limb(ctx, [[CX - 30, y + 6], [CX, y - 26], [CX + 30, y + 6]], 10, shade(look.packColor, -0.25));
+  outlined(ctx, () => roundRect(ctx, x, y, w, h, 30), look.packColor);
+  // Rounded volume: lit left edge, shaded right edge.
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  g.addColorStop(0, 'rgba(255, 230, 200, 0.28)');
+  g.addColorStop(0.35, 'rgba(255, 230, 200, 0)');
+  g.addColorStop(0.7, 'rgba(30, 10, 20, 0)');
+  g.addColorStop(1, 'rgba(30, 10, 20, 0.4)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  roundRect(ctx, x + 4, y + 4, w - 8, h - 8, 26);
+  ctx.fill();
+  // Side pockets visible beyond the torso.
+  for (const s of SIGN) outlined(ctx, () => roundRect(ctx, CX + s * 104 - 16, sk.hipY - 150, 32, 90, 12), shade(look.packColor, -0.12), 5);
 }
 
 function paintBackpackStraps(ctx: CanvasRenderingContext2D, look: HumanLook, sk: Skeleton): void {
-  for (const s of SIGN) limb(ctx, [[CX + s * 44, sk.shY - 4], [CX + s * 50, sk.shY + 70], [CX + s * 54, sk.shY + 160]], 16, shade(look.packColor, -0.2));
+  for (const s of SIGN) {
+    limb(ctx, [[CX + s * 44, sk.shY - 4], [CX + s * 50, sk.shY + 70], [CX + s * 54, sk.shY + 160]], 16, shade(look.packColor, -0.2));
+    // Buckle.
+    outlined(ctx, () => roundRect(ctx, CX + s * 51 - 11, sk.shY + 104, 22, 14, 3), '#c8c4bc', 4);
+  }
 }
 
 function paintBodyProp(ctx: CanvasRenderingContext2D, prop: BodyProp, sk: Skeleton, frame: number, progress: number, drawProgress: number): void {
@@ -1267,18 +1468,41 @@ export interface ToonActor {
   dispose: () => void;
 }
 
-function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: ActorSetup, d: ToonDrive, seed: number): void {
-  const sk = skeleton(setup.pose, d.frame, seed, setup.pose === 'stand' ? d.walkPhase : null, d.nod);
-  const face = mixFace(FACES[d.expression.from], FACES[d.expression.to], d.expression.mix);
-  const blink = blinkAt(d.frame, seed);
+function solvePose(pose: BodyPose, d: ToonDrive, seed: number): { sk: Skeleton; right: ArmSolve; left: ArmSolve } {
+  const sk = skeleton(pose, d.frame, seed, pose === 'stand' ? d.walkPhase : null, d.nod);
   const actx: ArmCtx = { frame: d.frame, progress: d.progress, drawProgress: d.drawProgress, turn: d.turn, sk };
   const arm = (side: 0 | 1, b: ArmBlend): ArmSolve => {
     const a = handTarget(b.from, side, actx);
     const c = handTarget(b.to, side, actx);
     return solveArm(side, [lerp(a[0], c[0], b.mix), lerp(a[1], c[1], b.mix)], sk);
   };
-  const right = arm(0, d.armRight);
-  const left = arm(1, d.armLeft);
+  return { sk, right: arm(0, d.armRight), left: arm(1, d.armLeft) };
+}
+
+/**
+ * Shoulder/hand/head positions in billboard-local world units at scale 1
+ * (x right of centre, y above the soles). Pure — used by framing checks.
+ */
+export function poseLayout(pose: BodyPose, d: ToonDrive, seed = 1): { head: Pt; chest: Pt; shoulders: readonly [Pt, Pt]; hands: readonly [Pt, Pt] } {
+  const { sk, right, left } = solvePose(pose, d, seed);
+  const w = (p: Pt): Pt => [(p[0] - CX) / PX, (SOLE - p[1]) / PX];
+  return { head: w([sk.headX, sk.headY]), chest: w([CX, (sk.shY + sk.hipY) / 2]), shoulders: [w(right.shoulder), w(left.shoulder)], hands: [w(right.hand), w(left.hand)] };
+}
+
+type HandShape = 'fist' | 'point' | 'palm';
+
+function handShape(b: ArmBlend): HandShape {
+  const p = b.mix < 0.5 ? b.from : b.to;
+  if (p === 'point' || p === 'pointHigh' || p === 'pointSide') return 'point';
+  if (p === 'palm' || p === 'spread' || p === 'wave' || p === 'trace' || p === 'traceLow' || p === 'reachUp') return 'palm';
+  return 'fist';
+}
+
+function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: ActorSetup, d: ToonDrive, seed: number): void {
+  const { sk, right, left } = solvePose(setup.pose, d, seed);
+  const face = mixFace(FACES[d.expression.from], FACES[d.expression.to], d.expression.mix);
+  const blink = blinkAt(d.frame, seed);
+  const shapes = [handShape(d.armRight), handShape(d.armLeft)] as const;
 
   if (setup.bodyProp === 'backpack') paintBackpackBack(ctx, look, sk);
   paintLegs(ctx, look, sk);
@@ -1286,7 +1510,7 @@ function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: Actor
   if (setup.bodyProp === 'backpack') paintBackpackStraps(ctx, look, sk);
   const lapProp = setup.bodyProp === 'lapSack' || setup.bodyProp === 'lapBakul' || setup.bodyProp === 'lapBoard' || setup.bodyProp === 'deskNotebook';
   if (setup.bodyProp === 'shoulderBasket') paintBodyProp(ctx, setup.bodyProp, sk, d.frame, d.progress, d.drawProgress);
-  paintHead(ctx, look, sk, face, d.turn, blink, d.nod);
+  paintHead(ctx, look, sk, face, d.turn, blink, d.nod, d.frame, seed);
   if (lapProp || setup.bodyProp === 'newspaper') paintBodyProp(ctx, setup.bodyProp, sk, d.frame, d.progress, d.drawProgress);
 
   const pocketR = d.armRight.mix < 0.5 ? d.armRight.from === 'pocket' : d.armRight.to === 'pocket';
@@ -1295,7 +1519,7 @@ function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: Actor
   const below = (p: HandProp): boolean => p === 'suitcase' || p === 'signalLamp';
   for (const [a, prop, side, pocket] of [[right, setup.rightProp, 0, pocketR], [left, setup.leftProp, 1, pocketL]] as const) {
     if (below(prop)) paintHandProp(ctx, prop, a, SIGN[side], d.frame);
-    paintArm(ctx, look, a, pocket);
+    paintArm(ctx, look, a, pocket, prop === 'none' ? shapes[side] : 'fist', SIGN[side]);
     if (!below(prop)) paintHandProp(ctx, prop, a, SIGN[side], d.frame);
   }
 }

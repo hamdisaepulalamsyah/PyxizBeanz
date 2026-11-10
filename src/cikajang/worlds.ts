@@ -235,6 +235,83 @@ function signBoard(kit: WorldKit, g: THREE.Object3D, lines: readonly string[], s
   return grp;
 }
 
+/** Transparent painted mountain silhouette layer with a mist band at its foot. */
+function ridgeLayer(kit: WorldKit, g: THREE.Object3D, o: { z: number; y: number; w: number; h: number; color: string; mist: string; seed: number; pts: readonly (readonly [number, number])[] }): void {
+  const tex = kit.canvas(1536, Math.round((1536 * o.h) / o.w), (c, w, h) => {
+    const grad = c.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, shadeHex(o.color, 0.12));
+    grad.addColorStop(1, o.color);
+    c.fillStyle = grad;
+    c.beginPath();
+    c.moveTo(0, h);
+    const r = mulberry32(o.seed);
+    o.pts.forEach(([x, y], i) => {
+      const next = o.pts[i + 1];
+      c.lineTo(x * w, y * h);
+      if (next) for (let k = 1; k < 6; k++) c.lineTo(lerp(x, next[0], k / 6) * w, (lerp(y, next[1], k / 6) + (r() - 0.5) * 0.02) * h);
+    });
+    c.lineTo(w, h);
+    c.closePath();
+    c.fill();
+    // Ridge-line highlight and soft mist pooling at the base.
+    c.globalCompositeOperation = 'source-atop';
+    const mist = c.createLinearGradient(0, h * 0.45, 0, h);
+    mist.addColorStop(0, 'rgba(255,255,255,0)');
+    mist.addColorStop(1, o.mist);
+    c.fillStyle = mist;
+    c.fillRect(0, 0, w, h);
+    c.globalCompositeOperation = 'source-over';
+  });
+  const mat = kit.track(new THREE.MeshBasicMaterial({ map: tex, transparent: true, fog: false, toneMapped: false, depthWrite: false }));
+  kit.mesh(g, new THREE.PlaneGeometry(o.w, o.h), mat, [0, o.y, o.z], { ink: false, shadow: false });
+}
+
+/** Chunky aged wooden sign with carved letters, iron frame + rivets and thick inked posts. */
+function carvedSign(kit: WorldKit, g: THREE.Object3D, lines: readonly string[], size: readonly [number, number], center: Vec3, yaw: number): THREE.Group {
+  const grp = new THREE.Group();
+  grp.position.set(...center);
+  grp.rotation.y = yaw;
+  g.add(grp);
+  const [w, h] = size;
+  const tex = kit.canvas(1024, Math.round((1024 * h) / w), (c, cw, ch) => {
+    planksPaint('#8a5a34', 17)(c, cw, ch);
+    const r = mulberry32(19);
+    c.strokeStyle = 'rgba(50,28,14,0.35)';
+    c.lineWidth = 2;
+    for (let i = 0; i < 40; i++) {
+      const y = r() * ch;
+      c.beginPath();
+      c.moveTo(0, y);
+      c.bezierCurveTo(cw * 0.3, y + (r() - 0.5) * 20, cw * 0.7, y + (r() - 0.5) * 20, cw, y + (r() - 0.5) * 10);
+      c.stroke();
+    }
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const lh = ch / (lines.length + 0.5);
+    lines.forEach((line, i) => {
+      const y = lh * (i + 0.78);
+      c.font = `900 ${Math.round(lh * (i === 0 ? 0.66 : 0.56))}px Georgia, serif`;
+      // Carved: dark recess, light lower lip, painted cream face.
+      c.fillStyle = 'rgba(30,16,8,0.85)';
+      c.fillText(line, cw / 2 - 3, y - 3);
+      c.fillStyle = 'rgba(255,220,170,0.45)';
+      c.fillText(line, cw / 2 + 3, y + 3);
+      c.fillStyle = '#f3e6c4';
+      c.fillText(line, cw / 2, y);
+    });
+    c.fillStyle = 'rgba(30,20,10,0.25)';
+    for (let i = 0; i < 70; i++) c.fillRect(r() * cw, r() * ch, 2 + r() * 8, 2 + r() * 4);
+  });
+  kit.box(grp, [w + 0.04, h + 0.04, 0.12], [0, 0, -0.06], '#5a3a20', { ink: 30 });
+  kit.mesh(grp, new THREE.PlaneGeometry(w, h), kit.toon('#ffffff', { map: tex }), [0, 0, 0.002], { ink: false, shadow: false });
+  const iron = kit.toon('#2c2a2e');
+  for (const sy of [-1, 1]) kit.box(grp, [w + 0.14, 0.06, 0.15], [0, sy * (h / 2 + 0.03), -0.04], iron, { ink: 30 });
+  for (const sx of [-1, 1]) kit.box(grp, [0.06, h + 0.18, 0.15], [sx * (w / 2 + 0.03), 0, -0.04], iron, { ink: 30 });
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) kit.mesh(grp, new THREE.SphereGeometry(0.025, 8, 6), '#8a8478', [sx * (w / 2 + 0.03), sy * (h / 2 + 0.03), 0.04], { ink: false });
+  for (const sx of [-1, 1]) kit.cyl(grp, 0.07, 0.08, center[1] + 0.1, [sx * w * 0.36, -center[1] / 2 - 0.05, -0.12], '#4a3220', { seg: 10, ink: 40 });
+  return grp;
+}
+
 function puffs(kit: WorldKit, g: THREE.Object3D, n: number, color: string): THREE.Sprite[] {
   const out: THREE.Sprite[] = [];
   for (let i = 0; i < n; i++) out.push(kit.puff(g, color));
@@ -612,7 +689,7 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
   const question = kit.mesh(g, new THREE.PlaneGeometry(0.75, 0.75), qMat, [0.5, 2.32, -0.7], { ink: false, shadow: false });
   const qGlow = kit.glow(g, '#ffb84a', 2.2, [0.5, 2.32, -0.66], 0);
 
-  const swing = lantern(kit, g, [-1.1, 4.0, -0.35], 0.75, 3, 2.6);
+  const swing = lantern(kit, g, [-1.1, 4.0, -0.35], 0.75, 3, 4.5);
   // Dry leaves: some flat on the cement, some tumbling through the foreground.
   const leafMat = kit.track(new THREE.MeshToonMaterial({ color: '#b8742e', gradientMap: kit.gradient, side: THREE.DoubleSide, map: kit.leafTexture(), alphaTest: 0.5 }));
   const leafGeo = kit.track(new THREE.PlaneGeometry(0.09, 0.16));
@@ -629,20 +706,32 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
     return { m, x: -0.6 + r() * 2.4, z: 1.2 + r() * 2.6, ph: r() * 6, sp: 0.006 + r() * 0.004, i };
   });
   const dust = kit.dust(g, [-2, 0.2, -0.8], [3, 3.2, 3], 220, '#ffd9a0', 0.03, 33);
+  // Low golden sun raking across the facade: a fake-volumetric beam with motes glowing in it.
+  const sunFrom: Vec3 = [-7, 3.6, 5];
+  const sunTo: Vec3 = [0.6, 0.6, -0.8];
+  const beam = kit.shaft(g, sunFrom, sunTo, 2.2, '#ffb466', 0.14);
+  const motes = kit.motes(g, { from: sunFrom, to: sunTo, radius: 2.2, count: 260, color: '#ffd9a0', size: 0.028, seed: 34 });
+  // Warm bounce off the cement onto the lower wall.
+  kit.point(g, '#ff9a4a', 1.4, 5, [0.4, 0.3, 0.8]);
 
-  kit.backdrop(g, [180, 60], [0, 18, -40], sky({ stops: [[0, '#3a2a5e'], [0.4, '#a2507a'], [0.62, '#f08a4a'], [0.78, '#ffc070'], [1, '#6a4a3a']], sun: { x: 0.28, y: 0.7, r: 0.03, color: 'rgba(255,220,150,0.9)' }, clouds: { color: 'rgba(255,170,120,0.55)', count: 14, y: 0.45 }, ridges: CIKURAY_RIDGES('#5a3a52', '#3e2a3c'), seed: 3 }), 3);
-  lightRig(kit, g, { sky: '#9a86c0', ground: '#5a4232', hemi: 1.0, key: '#ffb064', keyIntensity: 2.6, keyPos: [-14, 5, 10], keyTarget: [0, 1, -1], extent: 14 });
+  kit.backdrop(g, [180, 60], [0, 18, -40], sky({ stops: [[0, '#1b1840'], [0.32, '#4a2e6a'], [0.5, '#a2507a'], [0.66, '#f08a4a'], [0.8, '#ffc070'], [1, '#5a3a3a']], sun: { x: 0.24, y: 0.72, r: 0.035, color: 'rgba(255,214,140,0.95)' }, clouds: { color: 'rgba(255,160,110,0.6)', count: 16, y: 0.5 }, ridges: CIKURAY_RIDGES('#4a2e4e', '#2c1f3a'), seed: 3 }), 3);
+  // Golden-dusk rig: warm low key with crisp shadows, twilight-violet ambient fill.
+  const key = lightRig(kit, g, { sky: '#2c1f4a', ground: '#1b1840', hemi: 3.2, key: '#ffa550', keyIntensity: 3.6, keyPos: [-12, 4.2, 9], keyTarget: [0.3, 1, -0.8], extent: 7 });
+  key.shadow.radius = 1.5;
+  g.add(new THREE.HemisphereLight('#6a4a9a', '#2a1a20', 0.5));
 
   const finale = variant === 'angka-ketiga';
   return {
     id: 'stationRear',
     group: g,
-    anchors: { dindaTrace: v3(0.47, 0, -0.62), dindaCenter: v3(0.56, 0, -0.55) },
-    background: new THREE.Color('#2a1e3a'),
-    fog: new THREE.Fog('#8a5a5a', 20, 90),
+    anchors: { dindaTrace: v3(0.3, 0, -0.62), dindaCenter: v3(0.56, 0, -0.55) },
+    background: new THREE.Color('#1b1840'),
+    fog: new THREE.Fog('#4a2e52', 18, 85),
     update: ({ frame, progress }) => {
       swing(frame);
       dust(frame);
+      motes(frame);
+      beam.material.opacity = 0.12 + 0.03 * Math.sin(frame * 0.05);
       for (const l of falling) {
         const c = (((frame * l.sp + l.ph / 6) % 1) + 1) % 1;
         l.m.position.set(l.x + Math.sin(frame * 0.05 + l.ph) * 0.3, 3.2 - c * 3.2, l.z);
@@ -678,7 +767,7 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   kit.box(g, [22, 0.1, 3.9], [0, 3.75, -2.9], '#6a5a4a', { ink: 20, rot: [0.05, 0, 0] });
 
   // The elevation sign, chunky 3D cartoon board.
-  signBoard(kit, g, ['CIKAJANG', '1.246 MDPL'], [1.36, 0.64], [-1.35, 2.08, -1.75], { bg: '#f7f3ea', fg: '#1b1b2b', border: '#1b1b2b' }).rotation.y = 0.18;
+  carvedSign(kit, g, ['CIKAJANG', '1.246 MDPL'], [1.4, 0.68], [-1.35, 2.08, -1.75], 0.18);
 
   mountains(kit, g, [
     { x: -6, z: -80, r: 40, h: 34, color: '#56705a' },
@@ -690,8 +779,14 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   grass(kit, g, { min: [-16, 0.4, -4.8], max: [16, 0.4, -4.4], count: 120, size: 0.25, seed: 44, colors: ['#5a7a3a', '#6e8e48'] });
   const fog = fogBank(kit, g, 26, { min: [-18, 0.6, -14], max: [18, 3.5, 0.5] }, '#e8ecf0', 45);
   const fog2 = fogBank(kit, g, 18, { min: [-60, 5, -70], max: [60, 18, -30] }, '#f0f2f4', 46);
-  kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#b8c4d0'], [0.5, '#d6dce2'], [0.8, '#e4e6e6'], [1, '#c0c8c0']], clouds: { color: 'rgba(255,255,255,0.6)', count: 30, y: 0.35 }, ridges: CIKURAY_RIDGES('#8a9a94', '#7a8e80'), seed: 4 }), 4);
-  lightRig(kit, g, { sky: '#dfe6f0', ground: '#6a7060', hemi: 1.7, key: '#fff1dc', keyIntensity: 1.3, keyPos: [6, 14, 8], keyTarget: [0, 0, -2], extent: 16 });
+  // Layered mountain silhouettes (near ridge → Cikuray → distant Papandayan), mist between layers.
+  ridgeLayer(kit, g, { z: -150, y: 26, w: 520, h: 90, color: '#a9b6bc', mist: 'rgba(232,236,240,0.9)', seed: 1, pts: [[0, 0.62], [0.12, 0.5], [0.2, 0.44], [0.26, 0.47], [0.32, 0.4], [0.4, 0.46], [0.55, 0.58], [0.7, 0.55], [0.85, 0.6], [1, 0.58]] });
+  ridgeLayer(kit, g, { z: -110, y: 20, w: 420, h: 80, color: '#8a9ea2', mist: 'rgba(226,232,236,0.85)', seed: 2, pts: [[0, 0.8], [0.3, 0.66], [0.44, 0.34], [0.5, 0.26], [0.56, 0.34], [0.7, 0.62], [0.9, 0.72], [1, 0.74]] });
+  ridgeLayer(kit, g, { z: -70, y: 10, w: 300, h: 44, color: '#6c8478', mist: 'rgba(220,228,230,0.8)', seed: 3, pts: [[0, 0.5], [0.15, 0.4], [0.3, 0.52], [0.45, 0.36], [0.6, 0.5], [0.78, 0.38], [1, 0.5]] });
+  ridgeLayer(kit, g, { z: -40, y: 4, w: 220, h: 18, color: '#4f6a52', mist: 'rgba(214,222,222,0.75)', seed: 4, pts: [[0, 0.5], [0.2, 0.3], [0.4, 0.46], [0.6, 0.28], [0.8, 0.44], [1, 0.32]] });
+  const fog3 = fogBank(kit, g, 20, { min: [-80, 2, -105], max: [80, 14, -45] }, '#eef0f2', 47);
+  kit.backdrop(g, [700, 220], [0, 60, -190], sky({ stops: [[0, '#9eb0c2'], [0.45, '#c8d2dc'], [0.75, '#e2e6e8'], [1, '#d8dcdc']], clouds: { color: 'rgba(255,255,255,0.6)', count: 30, y: 0.3 }, seed: 4 }), 4);
+  lightRig(kit, g, { sky: '#dfe6f0', ground: '#5a6450', hemi: 1.5, key: '#fff0d6', keyIntensity: 1.8, keyPos: [-6, 12, 8], keyTarget: [0, 0, -2], extent: 12 });
   return {
     id: 'platformMist',
     group: g,
@@ -701,6 +796,7 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
     update: ({ frame }) => {
       fog(frame);
       fog2(frame);
+      fog3(frame);
     },
   };
 }
@@ -793,7 +889,7 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   chair(kit, g, [0, 0, -1.5], SEAT_HEIGHT * s, '#5a3820');
   // Desk-top props (no pens here: the only pen is in the station master's hand).
   const cal = new THREE.Group();
-  cal.position.set(-0.46, deskTop, -0.68);
+  cal.position.set(-0.66, deskTop, -0.48);
   cal.rotation.x = -0.28;
   g.add(cal);
   kit.box(cal, [0.3, 0.34, 0.03], [0, 0.17, -0.02], '#3a2a1c', { ink: 20 });
@@ -843,9 +939,9 @@ function buildCibatu(kit: WorldKit): WorldScene {
   kit.label(g, ['TJIBATOE'], [2.4, 0.42], [1.5, 3.6, -4.74], { bg: '#efe3c4', fg: '#1d2a4a', font: '800 {size}px Georgia, serif', border: '#1d2a4a' });
   for (let x = -12; x <= 16; x += 4) for (const z of [-0.9, -4.0]) kit.cyl(g, 0.07, 0.08, 3.2, [x, 0.45 + 1.6, z], '#2c3440', { seg: 10 });
   kit.box(g, [30, 0.1, 4.0], [2, 3.7, -2.45], '#5a4a3a', { ink: 20 });
-  kit.cyl(g, 0.012, 0.012, 0.42, [0.5, 3.45, -2.0], PALETTE.ink, { seg: 4, ink: false });
-  const tick = clock(kit, g, [0.5, 3.0, -2.0], 0.3, 6, 4, '06.04');
-  kit.label(g, ['06.04  ➜  GAROET'], [1.2, 0.22], [0.5, 2.55, -2.0], { bg: '#1d2a3a', fg: '#f6e6b0', font: '800 {size}px Georgia, serif' });
+  kit.cyl(g, 0.012, 0.012, 0.22, [0.5, 3.55, -2.0], PALETTE.ink, { seg: 4, ink: false });
+  const tick = clock(kit, g, [0.5, 3.2, -2.0], 0.3, 6, 4, '06.04');
+  kit.label(g, ['06.04  ➜  GAROET'], [1.2, 0.22], [0.5, 2.76, -2.0], { bg: '#1d2a3a', fg: '#f6e6b0', font: '800 {size}px Georgia, serif' });
 
   const loco = steamLoco(kit, g);
   const coach1 = carriage(kit, g, '#5a3a2a');
@@ -860,7 +956,7 @@ function buildCibatu(kit: WorldKit): WorldScene {
   return {
     id: 'cibatu',
     group: g,
-    anchors: { kondektur: v3(-0.9, 0.45, -1.35), queue1: v3(1.15, 0.45, -2.4), queue2: v3(1.85, 0.45, -2.62), queue3: v3(2.55, 0.45, -2.42) },
+    anchors: { kondektur: v3(0.5, 0.45, -1.55), queue1: v3(2.3, 0.45, -2.4), queue2: v3(2.95, 0.45, -2.62), queue3: v3(3.6, 0.45, -2.42) },
     background: new THREE.Color('#c8b8a0'),
     fog: new THREE.Fog('#d8ccb8', 14, 110),
     update: ({ frame, localFrame, progress }) => {
@@ -1083,7 +1179,7 @@ function buildGarut1982(kit: WorldKit): WorldScene {
   return {
     id: 'garut1982',
     group: g,
-    anchors: { petugas: v3(-0.25, 0.45, -1.2), diam1: v3(-2.0, 0.45, -2.3), diam2: v3(-2.85, 0.45, -1.45), diam3: v3(-1.4, 0.45, -3.1) },
+    anchors: { petugas: v3(-0.25, 0.45, -1.2), diam1: v3(-1.3, 0.45, -2.2), diam2: v3(-1.75, 0.45, -1.5), diam3: v3(-0.85, 0.45, -3.0) },
     background: new THREE.Color('#8a8c8e'),
     fog: new THREE.Fog('#9a9c9c', 16, 170),
     update: ({ frame, localFrame, progress }) => {
@@ -1200,8 +1296,8 @@ function buildCikajangToday(kit: WorldKit): WorldScene {
     c.fillStyle = 'rgba(60,90,40,0.55)';
     for (let i = 0; i < 18; i++) c.fillRect(r() * w, h * (0.8 + r() * 0.2), 30 + r() * 50, 12);
   });
-  kit.box(g, [1.32, 0.38, 0.06], [17.4, 0.92, -3.7], '#7a6a52', { ink: 20 });
-  kit.mesh(g, new THREE.PlaneGeometry(1.24, 0.3), kit.toon('#ffffff', { map: carve }), [17.4, 0.92, -3.665], { ink: false, shadow: false });
+  kit.box(g, [1.32, 0.38, 0.06], [17.5, 0.92, -3.7], '#7a6a52', { ink: 20 });
+  kit.mesh(g, new THREE.PlaneGeometry(1.24, 0.3), kit.toon('#ffffff', { map: carve }), [17.5, 0.92, -3.665], { ink: false, shadow: false });
   // Wild grass everywhere: field, platform cracks, against the wall.
   const grassCols = ['#5a8a3a', '#72a048', '#4a7430', '#8aa850'];
   grass(kit, g, { min: [-40, 0, 2.3], max: [40, 0, 30], count: 2600, size: 0.55, seed: 123, colors: grassCols });
@@ -1326,7 +1422,7 @@ function buildGarut2022(kit: WorldKit): WorldScene {
   return {
     id: 'garut2022',
     group: g,
-    anchors: { dinda: v3(0, 0.45, -1.7), p1: v3(1.55, 0.45, -2.65), p2: v3(2.45, 0.45, -2.25), p3: v3(-3.1, 0.45, -3.0) },
+    anchors: { dinda: v3(-0.55, 0.45, -1.7), p1: v3(1.55, 0.45, -2.65), p2: v3(2.45, 0.45, -2.25), p3: v3(-3.1, 0.45, -3.0) },
     background: new THREE.Color('#8cc0ec'),
     fog: new THREE.Fog('#c0d8e8', 30, 150),
     update: ({ progress }) => {
@@ -1382,6 +1478,7 @@ uniform float frame;
 uniform float dip;
 uniform float sepia;
 uniform float grey;
+uniform float tone;
 
 float linearDepth(vec2 uv) {
   float z = texture2D(tDepth, uv).x * 2.0 - 1.0;
@@ -1416,9 +1513,9 @@ void main() {
   vec3 col = acc / wsum;
 
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  // Gentle split tone: cool shadows, warm highlights.
-  col = mix(col, col * vec3(0.84, 0.9, 1.18), (1.0 - smoothstep(0.0, 0.3, l)) * 0.35);
-  col += vec3(1.0, 0.75, 0.42) * smoothstep(0.5, 1.3, l) * 0.06;
+  // Persis-style dual tone: indigo shadows, amber highlights (strength per shot).
+  col = mix(col, col * vec3(0.72, 0.8, 1.35) + vec3(0.004, 0.006, 0.02), (1.0 - smoothstep(0.0, 0.3, l)) * tone);
+  col += vec3(1.0, 0.72, 0.38) * smoothstep(0.45, 1.3, l) * (0.03 + tone * 0.1);
   // Archival sepia for the 1930s–1980s shots.
   vec3 sep = vec3(l) * vec3(1.12, 0.92, 0.66) + vec3(0.018, 0.01, 0.0);
   col = mix(col, sep, sepia);
@@ -1426,7 +1523,7 @@ void main() {
   col = mix(col, vec3(l) * vec3(0.9, 0.94, 1.0) * 0.92, grey);
 
   vec2 vq = (vUv - 0.5) * vec2(0.95, 1.15);
-  col *= mix(0.62 - sepia * 0.08, 1.0, smoothstep(0.85, 0.25, length(vq)));
+  col *= mix(0.58 - sepia * 0.06, 1.0, smoothstep(0.85, 0.25, length(vq)));
   col = mix(col, vec3(0.012, 0.01, 0.02), dip);
 
   col = toSRGB(clamp(col, 0.0, 1.0));
@@ -1442,6 +1539,7 @@ export interface FilmParams {
   dip: number;
   sepia: number;
   grey: number;
+  tone: number;
 }
 
 export class FilmPipeline {
@@ -1468,6 +1566,7 @@ export class FilmPipeline {
         dip: { value: 0 },
         sepia: { value: 0 },
         grey: { value: 0 },
+        tone: { value: 0.4 },
       },
       depthTest: false,
       depthWrite: false,
@@ -1511,6 +1610,7 @@ export class FilmPipeline {
     set('dip', params.dip);
     set('sepia', params.sepia);
     set('grey', params.grey);
+    set('tone', params.tone);
     renderer.render(this.quadScene, this.quadCamera);
   }
 
