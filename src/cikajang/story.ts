@@ -218,9 +218,9 @@ export const SHOTS: readonly Shot[] = [
     // 3/4 medium shot from the right: Dinda's head, hijab, backpack and the arm reaching
     // from her shoulder to the carving all stay in frame, then a slow dolly-out.
     camera: [
-      { t: 0, pos: [0.62, 1.32, 1.95], target: [0.04, 1.12, -0.8], fov: 38 },
-      { t: 0.45, pos: [0.7, 1.38, 2.8], target: [0.12, 1.1, -0.8], fov: 38 },
-      { t: 1, pos: [0.75, 1.5, 4.8], target: [0.3, 1.08, -0.8], fov: 38 },
+      { t: 0, pos: [0.42, 1.3, 2.4], target: [-0.02, 1.1, -0.8], fov: 38 },
+      { t: 0.45, pos: [0.55, 1.38, 3.1], target: [0.06, 1.1, -0.8], fov: 38 },
+      { t: 1, pos: [0.62, 1.5, 4.8], target: [0.2, 1.08, -0.8], fov: 38 },
     ],
     grade: { sepia: [[0, 0]], tone: 0.6 },
     cast: [
@@ -317,7 +317,8 @@ export const SHOTS: readonly Shot[] = [
       { t: 0, pos: [0.35, 1.5, 2.4], target: [0.05, 1.0, -1.2], fov: 40 },
       { t: 0.32, pos: [1.75, 1.3, 0.75], target: [2.4, 0.95, -2.5], fov: 38 },
       { t: 0.62, pos: [0.25, 1.25, 1.0], target: [-0.05, 0.95, -1.1], fov: 38 },
-      { t: 1, pos: [-0.62, 1.0, 0.02], target: [-0.66, 0.93, -0.5], fov: 30 },
+      { t: 0.82, pos: [-0.62, 1.06, 1.5], target: [-0.66, 0.9, -0.5], fov: 30 },
+      { t: 1, pos: [-0.64, 1.05, 1.44], target: [-0.66, 0.9, -0.5], fov: 30 },
     ],
     grade: SEPIA,
     cast: [
@@ -417,10 +418,10 @@ export const SHOTS: readonly Shot[] = [
     ],
     aperture: [[0, 0.5]],
     camera: [
-      { t: 0, pos: [0.1, 1.6, 3.6], target: [-0.8, 1.65, -2.2], fov: 38 },
-      { t: 0.49, pos: [0.0, 1.6, 3.0], target: [-0.9, 1.75, -2.2], fov: 36 },
-      { t: 0.535, pos: [6.6, 1.5, 3.6], target: [9.0, 0.7, 0.5], fov: 38 },
-      { t: 1, pos: [8.0, 1.2, 2.5], target: [9.1, 0.55, 0.4], fov: 36 },
+      { t: 0, pos: [0.1, 1.7, 3.6], target: [-0.8, 1.95, -2.2], fov: 38 },
+      { t: 0.49, pos: [0.0, 1.7, 3.4], target: [-0.9, 2.0, -2.2], fov: 38 },
+      { t: 0.535, pos: [7.4, 1.6, 4.8], target: [9.3, 1.4, 0.3], fov: 40 },
+      { t: 1, pos: [8.5, 1.6, 4.6], target: [9.35, 1.4, 0.3], fov: 40 },
     ],
     grade: SEPIA,
     cast: [
@@ -482,7 +483,7 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'STASIUN GARUT', year: '1982' }]],
     aperture: [[0, 0.45]],
     camera: [
-      { t: 0, pos: [-0.55, 1.7, 3.6], target: [-0.75, 1.45, -1.8], fov: 44 },
+      { t: 0, pos: [-0.15, 1.7, 3.6], target: [-0.25, 1.45, -1.8], fov: 44 },
       { t: 0.4, pos: [0.3, 1.65, 3.6], target: [0.1, 1.5, -1.4], fov: 38 },
       { t: 0.7, pos: [0.8, 1.75, 4.1], target: [1.2, 1.3, -8], fov: 36 },
       { t: 1, pos: [0.9, 1.75, 4.4], target: [1.6, 1.15, -40], fov: 34 },
@@ -500,7 +501,7 @@ export const SHOTS: readonly Shot[] = [
         turn: [[0, 0.3], [0.5, 0]],
       },
       { actor: 'penumpangPria', anchor: 'diam1', scale: 1.15, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'suitcase']], left: [[0, 'side']], rightProp: 'suitcase', turn: [[0, 0.5]] },
-      { actor: 'ibuBakul', anchor: 'diam2', scale: 1.1, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'side']], turn: [[0, 0.6]] },
+      { actor: 'ibuBakul', anchor: 'diam2', scale: 1.1, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'pocket']], turn: [[0, 0.6]] },
       { actor: 'bapakPeci', anchor: 'diam3', scale: 1.15, pose: 'stand', expression: [[0, 'sad']], right: [[0, 'side']], left: [[0, 'hip']], turn: [[0, 0.4]], nod: [[0, 0.5]] },
     ],
   },
@@ -515,8 +516,8 @@ export const SHOTS: readonly Shot[] = [
     aperture: [[0, 0.3], [1, 0.45]],
     camera: [
       { t: 0, pos: [0.0, 6.2, 9.5], target: [0.0, 2.0, -4], fov: 46 },
-      { t: 0.6, pos: [0.3, 2.4, 5.6], target: [0.0, 1.6, -3.5], fov: 42 },
-      { t: 1, pos: [0.4, 1.45, 3.7], target: [0.0, 1.35, -3], fov: 38 },
+      { t: 0.6, pos: [0.3, 2.4, 5.8], target: [0.0, 1.65, -3.5], fov: 42 },
+      { t: 1, pos: [0.4, 1.55, 4.3], target: [0.0, 1.75, -3], fov: 38 },
     ],
     grade: { sepia: [[0, 0.92], [0.04, 0.92], [0.22, 0]] },
     cast: [
@@ -524,8 +525,9 @@ export const SHOTS: readonly Shot[] = [
         anchor: 'dindaCenter',
         pose: 'stand',
         expression: [[0, 'wonder'], [0.5, 'warm']],
-        right: [[0, 'side'], [0.2, 'pointSide'], [0.62, 'pointSide'], [0.72, 'palm']],
-        left: [[0, 'side'], [0.24, 'spread'], [0.66, 'spread'], [0.76, 'strap']],
+        // Natural asymmetric gesture (open palm + hand on the backpack strap): never a T-pose.
+        right: [[0, 'side'], [0.2, 'palm'], [0.62, 'palm'], [0.74, 'hip']],
+        left: [[0, 'side'], [0.24, 'strap']],
         turn: [[0, 0.2], [0.5, 0]],
       }),
     ],
@@ -539,12 +541,12 @@ export const SHOTS: readonly Shot[] = [
     cut: 'dip',
     chip: [[0, { place: 'UKIRAN', year: '“STATION TJIKADJANG”' }]],
     aperture: [[0, 0.7], [1, 0.75]],
-    // Medium shot: the tail of the carving ("…djang"), Dinda's hand on it AND her shoulder/head,
-    // then push in and rack focus from the stone to her face.
+    // Wide-enough medium shot: the WHOLE "Station Tjikadjang" carving stays inside 82 % of the frame width
+    // (even after the creeping push-in) with Dinda's hand on it and her shoulder/head, then rack focus to her face.
     camera: [
-      { t: 0, pos: [18.05, 1.35, -0.6], target: [18.0, 1.3, -3.6], fov: 38 },
-      { t: 0.5, pos: [18.1, 1.42, -1.0], target: [18.1, 1.38, -3.55], fov: 36 },
-      { t: 1, pos: [18.2, 1.55, -1.6], target: [18.25, 1.55, -3.45], fov: 34 },
+      { t: 0, pos: [17.62, 1.4, 3.7], target: [17.62, 1.35, -3.6], fov: 38 },
+      { t: 0.5, pos: [17.64, 1.45, 3.5], target: [17.65, 1.4, -3.55], fov: 38 },
+      { t: 1, pos: [17.68, 1.55, 3.3], target: [17.7, 1.5, -3.5], fov: 38 },
     ],
     focus: [[0, [17.75, 1.18, -3.68]], [0.45, [17.75, 1.18, -3.68]], [0.72, [18.3, 1.62, -3.45]]],
     grade: COLOUR,
@@ -571,7 +573,7 @@ export const SHOTS: readonly Shot[] = [
     aperture: [[0, 0.4]],
     camera: [
       { t: 0, pos: [-0.55, 1.6, 2.9], target: [-0.9, 1.6, -2.0], fov: 40 },
-      { t: 0.45, pos: [-1.35, 1.8, 0.4], target: [-1.55, 1.8, -2.5], fov: 34 },
+      { t: 0.45, pos: [-1.4, 1.78, 2.2], target: [-1.5, 1.75, -2.5], fov: 34 },
       { t: 0.7, pos: [0.2, 1.8, 3.6], target: [2.5, 1.5, 0.9], fov: 40 },
       { t: 1, pos: [2.2, 1.7, 4.4], target: [5.5, 1.4, 0.9], fov: 40 },
     ],
@@ -605,8 +607,8 @@ export const SHOTS: readonly Shot[] = [
     chip: [[0, { place: 'STASIUN CIKAJANG', year: '20??' }]],
     aperture: [[0, 0.45], [1, 0.6]],
     camera: [
-      { t: 0, pos: [0.55, 1.4, 6.0], target: [0.5, 1.45, -0.8], fov: 26 },
-      { t: 1, pos: [0.52, 2.0, 2.1], target: [0.5, 2.25, -0.8], fov: 56 },
+      { t: 0, pos: [0.3, 1.6, 6.0], target: [0.22, 1.65, -0.8], fov: 26 },
+      { t: 1, pos: [0.28, 1.8, 2.1], target: [0.22, 1.95, -0.8], fov: 56 },
     ],
     grade: { sepia: [[0, 0]], tone: 0.6 },
     cast: [
