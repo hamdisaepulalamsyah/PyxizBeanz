@@ -2044,10 +2044,10 @@ function buildPesantren(kit: WorldKit): WorldScene {
     for (let k = 0; k < 4; k++) kit.mesh(g, new THREE.IcosahedronGeometry(1.1 - k * 0.15, 0), kit.facet('#2b4a33'), [x + (k % 2 ? 0.5 : -0.5), 2.6 + k * 0.5, -3 + (k % 3) * 0.3], { ink: 40 });
   }
 
-  // Platform, signpost and the line to Bangil.
-  kit.box(g, [10, 0.3, 1.8], [-3.5, 0.15, -1.9], '#6b6578');
-  kit.cyl(g, 0.05, 0.05, 2, [-7, 1, -1.3], '#e6dcc6', { seg: 8 });
-  kit.label(g, ['← BANGIL'], [1.3, 0.38], [-7, 1.8, -1.24], { bg: '#efe3c4', fg: '#1b1b2b', font: '800 {size}px Georgia, serif', border: '#1b1b2b' });
+  // Platform on the camera side of the line, so the departing train passes behind A. Hassan.
+  kit.box(g, [10, 0.3, 1.8], [-3.5, 0.15, 3.0], '#6b6578');
+  kit.cyl(g, 0.05, 0.05, 2, [-7, 1, 3.6], '#e6dcc6', { seg: 8 });
+  kit.label(g, ['← BANGIL'], [1.3, 0.38], [-7, 1.8, 3.66], { bg: '#efe3c4', fg: '#1b1b2b', font: '800 {size}px Georgia, serif', border: '#1b1b2b' });
   kit.box(g, [60, 0.18, 2.2], [0, 0.09, 0.8], '#3a3448', { ink: false });
   for (let i = 0; i < 90; i++) kit.box(g, [0.22, 0.08, 2.0], [-27 + i * 0.6, 0.22, 0.8], '#3b2a20', { ink: false });
   for (const z of [0.2, 1.4]) kit.box(g, [60, 0.1, 0.08], [0, 0.31, z], '#9aa0b8', { ink: false });
@@ -2103,7 +2103,7 @@ function buildPesantren(kit: WorldKit): WorldScene {
   return {
     id: 'pesantren1936',
     group: g,
-    anchors: { platform: new THREE.Vector3(-3.2, 0.3, -2.2) },
+    anchors: { platform: new THREE.Vector3(-3.2, 0.3, 3.0) },
     background: new THREE.Color('#141234'),
     fog: new THREE.Fog('#2a2148', 22, 80),
     update: ({ frame, localFrame, progress }) => {

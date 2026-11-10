@@ -319,7 +319,8 @@ export const SHOTS: readonly Shot[] = [
     aperture: 0.5,
     camera: [
       { t: 0, pos: [6, 2.5, 11], target: [0, 2.3, -3], fov: 40 },
-      { t: 1, pos: [-2.4, 2.1, 9.8], target: [-3.3, 1.8, -1.8], fov: 34 },
+      { t: 0.42, pos: [-1.6, 2.2, 10.2], target: [-3.2, 1.05, 3], fov: 36 },
+      { t: 1, pos: [-2.5, 2.0, 9.0], target: [-3.2, 1.0, 3], fov: 33 },
     ],
     cast: [
       {
