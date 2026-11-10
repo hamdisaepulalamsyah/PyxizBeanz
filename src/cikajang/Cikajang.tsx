@@ -19,6 +19,7 @@ import {
   buildCaptionPages,
   captionPageAt,
   cutDipAt,
+  cutFlashAt,
   easeInCubic,
   easeOutCubic,
   getShotAt,
@@ -73,6 +74,42 @@ interface CastSlot {
   member: CastMember;
   actor: ToonActor;
   anchor: THREE.Vector3;
+  blob: THREE.Mesh;
+}
+
+/** Contact shadow sits 1.5 cm above the floor to avoid z-fighting. */
+const BLOB_LIFT = new THREE.Vector3(0, 0.015, 0);
+
+/**
+ * Camera-relative frozen sun: every shadow-casting directional light is re-aimed
+ * once per shot at the mean camera target (keeping its original direction), with a
+ * tight shadow frustum around the action, so directional shadows are crisp and
+ * never shimmer as the camera moves.
+ */
+function freezeSun(group: THREE.Group, shot: (typeof SHOTS)[number]): void {
+  const centre = new THREE.Vector3();
+  for (const k of shot.camera) centre.add(new THREE.Vector3(...k.target));
+  centre.divideScalar(Math.max(1, shot.camera.length));
+  let spread = 0;
+  for (const k of shot.camera) spread = Math.max(spread, centre.distanceTo(new THREE.Vector3(...k.target)));
+  // Long-range targets (crane-ups to distant slopes) are clamped so the frustum stays tight.
+  const extent = Math.min(14, 4 + spread * 0.6);
+  const focus = centre.clone();
+  if (spread > 12) focus.lerp(new THREE.Vector3(...(shot.camera[0]?.target ?? [0, 0, 0])), 0.8);
+  group.traverse((o) => {
+    if (!(o instanceof THREE.DirectionalLight) || !o.castShadow) return;
+    const dir = o.position.clone().sub(o.target.position).normalize();
+    o.target.position.copy(focus);
+    o.position.copy(focus).addScaledVector(dir, 30);
+    const c = o.shadow.camera;
+    c.left = -extent;
+    c.right = extent;
+    c.top = extent;
+    c.bottom = -extent;
+    c.near = 1;
+    c.far = 70;
+    c.updateProjectionMatrix();
+  });
 }
 
 interface Stage {
@@ -86,6 +123,33 @@ class StageManager {
   private readonly kit = new WorldKit();
   private readonly stages = new Map<number, Stage>();
   private actors: ToonActor[] = [];
+  private blobGeo: THREE.CircleGeometry | null = null;
+  private blobMat: THREE.MeshBasicMaterial | null = null;
+
+  /** Soft-edged ellipse (radial alpha) shared by every contact shadow. */
+  private blobGeometry(): THREE.CircleGeometry {
+    if (!this.blobGeo) this.blobGeo = new THREE.CircleGeometry(0.5, 40);
+    return this.blobGeo;
+  }
+
+  private blobMaterial(): THREE.MeshBasicMaterial {
+    if (!this.blobMat) {
+      const c = document.createElement('canvas');
+      c.width = 128;
+      c.height = 128;
+      const g = c.getContext('2d');
+      if (!g) throw new Error('Canvas2D context unavailable');
+      const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, 'rgba(20, 10, 25, 0.45)');
+      grad.addColorStop(0.6, 'rgba(20, 10, 25, 0.32)');
+      grad.addColorStop(1, 'rgba(20, 10, 25, 0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 128, 128);
+      const tex = new THREE.CanvasTexture(c);
+      this.blobMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    }
+    return this.blobMat;
+  }
 
   get(index: number): Stage {
     const hit = this.stages.get(index);
@@ -93,19 +157,27 @@ class StageManager {
     const shot = SHOTS[index];
     if (!shot) throw new Error(`Unknown shot ${index}`);
     const world = buildWorld(shot.world, this.kit, shot.id);
+    freezeSun(world.group, shot);
     const cast = shot.cast.map((member, i): CastSlot => {
       const anchor = world.anchors[member.anchor];
       if (!anchor) throw new Error(`World "${shot.world}" has no anchor "${member.anchor}"`);
       const actor = createToonActor(
         member.actor,
-        { leftProp: member.leftProp ?? 'none', rightProp: member.rightProp ?? 'none', bodyProp: member.bodyProp ?? 'none' },
+        { pose: member.pose, leftProp: member.leftProp ?? 'none', rightProp: member.rightProp ?? 'none', bodyProp: member.bodyProp ?? 'none' },
         { gradientMap: this.kit.gradient, seed: index * 13 + i * 5 + 1 },
       );
       actor.mesh.position.copy(anchor);
       actor.mesh.scale.setScalar(member.scale);
       world.group.add(actor.mesh);
       this.actors.push(actor);
-      return { member, actor, anchor: anchor.clone() };
+      // Contact shadow blob under the feet: figures never float.
+      const blob = new THREE.Mesh(this.blobGeometry(), this.blobMaterial());
+      blob.rotation.x = -Math.PI / 2;
+      blob.scale.set(0.9 * member.scale, 0.55 * member.scale, 1);
+      blob.position.copy(anchor).add(BLOB_LIFT);
+      blob.renderOrder = 1;
+      world.group.add(blob);
+      return { member, actor, anchor: anchor.clone(), blob };
     });
     world.group.visible = false;
     this.root.add(world.group);
@@ -121,6 +193,9 @@ class StageManager {
   dispose(): void {
     for (const a of this.actors) a.dispose();
     this.actors = [];
+    this.blobGeo?.dispose();
+    this.blobMat?.map?.dispose();
+    this.blobMat?.dispose();
     this.kit.dispose();
     this.stages.clear();
   }
@@ -138,7 +213,7 @@ const CikajangScene: React.FC = () => {
   const manager = useMemo(() => new StageManager(), []);
   const film = useMemo(() => new FilmPipeline(width, height), [width, height]);
   const sample = useMemo(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35, roll: 0, focus: 5 }), []);
-  const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0, sepia: 0, grey: 0, tone: 0.4 });
+  const filmParams = useRef({ focusDistance: 5, aperture: 0.5, frame: 0, dip: 0, sepia: 0, grey: 0, tone: 0.4, flash: 0 });
 
   useLayoutEffect(() => {
     scene.add(manager.root);
@@ -176,14 +251,17 @@ const CikajangScene: React.FC = () => {
 
     stage.world.update({ frame, localFrame, progress, fps, camera });
     const len = Math.max(1, shot.to - shot.from - 1);
-    for (const { member, actor, anchor } of stage.cast) {
+    for (const { member, actor, anchor, blob } of stage.cast) {
       actor.mesh.visible = isCastVisible(member, progress);
+      blob.visible = actor.mesh.visible;
       if (!actor.mesh.visible) continue;
       // Keyed walk path: legs cycle with distance travelled, so feet never skate.
       keyedVec3(member.move, progress, offsetNow);
       keyedVec3(member.move, Math.max(0, progress - 1 / len), offsetPrev);
       keyedVec3(member.move, 0, offsetStart);
       actor.mesh.position.copy(anchor).add(offsetNow);
+      blob.visible = true;
+      blob.position.copy(actor.mesh.position).add(BLOB_LIFT);
       const moving = member.move ? offsetNow.distanceTo(offsetPrev) > 0.0015 : false;
       const travelled = offsetNow.distanceTo(offsetStart);
       actor.update(
@@ -204,7 +282,7 @@ const CikajangScene: React.FC = () => {
     }
 
     const grade = gradeAt(frame);
-    filmParams.current = { focusDistance: sample.focus, aperture: apertureAt(frame), frame, dip: cutDipAt(frame), sepia: grade.sepia, grey: grade.grey, tone: grade.tone };
+    filmParams.current = { focusDistance: sample.focus, aperture: apertureAt(frame), frame, dip: cutDipAt(frame), sepia: grade.sepia, grey: grade.grey, tone: grade.tone, flash: cutFlashAt(frame) };
   }, [frame, fps, camera, scene, manager, sample]);
 
   // Priority 1 takes over rendering from R3F so the film pass runs last.

@@ -2,12 +2,7 @@ import * as THREE from 'three';
 import { PALETTE, type WorldFrame, WorldKit, mulberry32 } from '../persis/worlds';
 import type { Vec3, WorldId } from './story';
 import { clamp01, easeInCubic, easeOutCubic, keyed, lerp, smoothstep } from './story';
-import { DESK_LINE } from './toon';
-
-/** Bench / chair seat height; bean-head busts sit with their base on it. */
-const SEAT_HEIGHT = 0.46;
-/** Standard desk height (the station master's bust is raised so the desk line meets his waist). */
-const DESK_TOP = 0.76;
+import { DESK_HEIGHT, SEAT_HEIGHT } from './toon';
 
 /**
  * Three.js worlds for "Sejarah Cikajang, Garut" (11 sets for 13 shots) plus the
@@ -170,7 +165,8 @@ function railway(kit: WorldKit, g: THREE.Object3D, o: { axis: 'x' | 'z'; from: n
   const sz = (l: number, h: number, w: number): Vec3 => (o.axis === 'x' ? [l, h, w] : [w, h, l]);
   const ballast = along(mid, 0);
   kit.box(g, sz(len, 0.16, 2.4), [ballast[0], y + 0.08, ballast[2]], '#5e574f', { ink: false, shadow: false });
-  const sleeper = kit.toon(o.rust ? '#4a3a2a' : '#3b2a20');
+  // Weathered timber sleepers (paint.js 'beam' texture).
+  const sleeper = kit.toon(o.rust ? '#b8a890' : '#ffffff', { map: kit.canvas(256, 64, beamPaint(o.rust ? '#5a4632' : '#4a3424', o.rust ? 7 : 5)) });
   const n = Math.floor(Math.abs(len) / 0.6);
   const geo = new THREE.BoxGeometry(...sz(0.22, 0.08, 2.0));
   const inst = new THREE.InstancedMesh(kit.track(geo), sleeper, n);
@@ -209,7 +205,7 @@ function facade(kit: WorldKit, g: THREE.Object3D, o: { x0: number; x1: number; f
   const w = o.x1 - o.x0;
   const cx = (o.x0 + o.x1) / 2;
   kit.box(g, [w, o.h, depth], [cx, o.h / 2, o.face - depth / 2], o.wall, { ink: 20 });
-  kit.box(g, [w + 0.02, 0.5, 0.06], [cx, 0.25, o.face + 0.02], o.plinth ?? '#5a5048', { ink: false, shadow: false });
+  kit.box(g, [w + 0.02, 0.5, 0.06], [cx, 0.25, o.face + 0.02], o.plinth ? o.plinth : kit.toon('#ffffff', { map: kit.canvas(512, 128, stonePaint('#6a6058', 9), { repeat: [w / 2, 1] }) }), { ink: false, shadow: false });
   kit.box(g, [w + 1.2, 0.18, depth + 2.6], [cx, o.h + 0.09, o.face - depth / 2 + 0.7], '#e8dcc0', { ink: 20 });
   kit.hipRoof(g, w + 1.6, depth + 3, 2.2, [cx, o.h + 0.18, o.face - depth / 2 + 0.7], o.roof);
 }
@@ -418,6 +414,112 @@ function room(kit: WorldKit, g: THREE.Object3D, o: { x0: number; x1: number; z0:
   kit.box(g, [w, 0.9, 0.04], [cx, 0.45, o.z0 + 0.02], o.wainscot, { ink: 10, shadow: false });
   kit.box(g, [0.04, 0.9, d], [o.x0 + 0.02, 0.45, cz], o.wainscot, { ink: 10, shadow: false });
   kit.box(g, [0.04, 0.9, d], [o.x1 - 0.02, 0.45, cz], o.wainscot, { ink: 10, shadow: false });
+}
+
+/** Old mossy planks ('rotten'): grain, split ends, dark rot patches and green moss along the seams. */
+function rottenPlanksPaint(base: string, seed: number): Paint {
+  return (c, w, h) => {
+    planksPaint(base, seed)(c, w, h);
+    const r = mulberry32(seed + 3);
+    c.strokeStyle = 'rgba(40,24,12,0.35)';
+    c.lineWidth = 2;
+    for (let i = 0; i < 30; i++) {
+      const y = r() * h;
+      c.beginPath();
+      c.moveTo(0, y);
+      c.bezierCurveTo(w * 0.3, y + (r() - 0.5) * 10, w * 0.7, y + (r() - 0.5) * 10, w, y + (r() - 0.5) * 6);
+      c.stroke();
+    }
+    for (let i = 0; i < 14; i++) {
+      c.fillStyle = `rgba(30,20,12,${0.2 + r() * 0.25})`;
+      c.beginPath();
+      c.ellipse(r() * w, r() * h, 8 + r() * 30, 4 + r() * 10, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+    for (let i = 0; i < 160; i++) {
+      c.fillStyle = r() > 0.5 ? 'rgba(92,128,58,0.55)' : 'rgba(120,150,70,0.45)';
+      const y = (Math.floor(r() * 6) / 6) * h + (r() - 0.5) * 6;
+      c.beginPath();
+      c.arc(r() * w, y, 1.5 + r() * 4, 0, Math.PI * 2);
+      c.fill();
+    }
+  };
+}
+
+/** Weathered timber beam / sleeper: end-grain bands, cracks and bolt holes ('beam'). */
+function beamPaint(base: string, seed: number): Paint {
+  return (c, w, h) => {
+    c.fillStyle = base;
+    c.fillRect(0, 0, w, h);
+    const r = mulberry32(seed);
+    for (let i = 0; i < 18; i++) {
+      c.strokeStyle = `rgba(${r() > 0.5 ? '255,230,200' : '20,10,5'},${0.08 + r() * 0.12})`;
+      c.lineWidth = 1 + r() * 2;
+      const y = r() * h;
+      c.beginPath();
+      c.moveTo(0, y);
+      c.lineTo(w, y + (r() - 0.5) * 8);
+      c.stroke();
+    }
+    c.strokeStyle = 'rgba(15,8,4,0.6)';
+    c.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const x = r() * w;
+      c.beginPath();
+      c.moveTo(x, h * 0.2);
+      c.lineTo(x + 20 + r() * 30, h * (0.4 + r() * 0.4));
+      c.stroke();
+    }
+    c.fillStyle = 'rgba(40,40,44,0.9)';
+    for (const x of [w * 0.2, w * 0.8]) {
+      c.beginPath();
+      c.arc(x, h / 2, 4, 0, Math.PI * 2);
+      c.fill();
+    }
+  };
+}
+
+/** Dressed andesite blocks with mortar joints and lichen (plinths, carved stones). */
+function stonePaint(base: string, seed: number): Paint {
+  return (c, w, h) => {
+    c.fillStyle = '#4a4440';
+    c.fillRect(0, 0, w, h);
+    const r = mulberry32(seed);
+    const rows = 2;
+    for (let row = 0; row < rows; row++) {
+      let x = row % 2 ? -w * 0.12 : 0;
+      while (x < w) {
+        const bw = w * (0.18 + r() * 0.12);
+        c.fillStyle = shadeHex(base, (r() - 0.5) * 0.25);
+        c.fillRect(x + 3, (row * h) / rows + 3, bw - 6, h / rows - 6);
+        c.fillStyle = 'rgba(255,255,255,0.08)';
+        c.fillRect(x + 3, (row * h) / rows + 3, bw - 6, 4);
+        x += bw;
+      }
+    }
+    for (let i = 0; i < 90; i++) {
+      c.fillStyle = r() > 0.6 ? 'rgba(150,170,110,0.4)' : 'rgba(20,18,16,0.25)';
+      c.beginPath();
+      c.arc(r() * w, r() * h, 1 + r() * 3, 0, Math.PI * 2);
+      c.fill();
+    }
+  };
+}
+
+/** Platform bench: rotten mossy slats on weathered beams. */
+function peronBench(kit: WorldKit, g: THREE.Object3D, center: Vec3, len: number, yaw = 0): void {
+  const grp = new THREE.Group();
+  grp.position.set(...center);
+  grp.rotation.y = yaw;
+  g.add(grp);
+  const slat = kit.toon('#ffffff', { map: kit.canvas(512, 128, rottenPlanksPaint('#7a5a3a', 91), { repeat: [len / 1.2, 1] }) });
+  const beam = kit.toon('#ffffff', { map: kit.canvas(256, 64, beamPaint('#4a3424', 93)) });
+  for (const z of [-0.12, 0.0, 0.12]) kit.box(grp, [len, 0.04, 0.1], [0, 0.48, z], slat, { ink: 20 });
+  for (const y of [0.66, 0.8]) kit.box(grp, [len, 0.1, 0.03], [0, y, -0.2], slat, { ink: 20 });
+  for (const x of [-len / 2 + 0.12, len / 2 - 0.12]) {
+    kit.box(grp, [0.08, 0.46, 0.34], [x, 0.23, 0], beam, { ink: 20 });
+    kit.box(grp, [0.06, 0.4, 0.05], [x, 0.66, -0.2], beam, { ink: 20 });
+  }
 }
 
 function planksPaint(base: string, seed: number): Paint {
@@ -645,11 +747,12 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
   kit.label(g, ['TJIKADJANG'], [1.6, 0.3], [1.2, 3.0, -0.84], { bg: '#efe3c4', fg: '#3a2412', font: '800 {size}px Georgia, serif', border: '#5a3a24' });
   for (const x of [-7.5, -4.2, 4.6, 7.8]) {
     windowPane(kit, g, [x, 1.9, -0.86], 1.0, 1.4, '#3a3048', '#5a3a24');
+  peronBench(kit, g, [-2.6, 0, -0.5], 1.6);
     for (const s of [-1, 1]) kit.box(g, [0.5, 1.5, 0.05], [x + s * 0.8, 1.9, -0.8], '#4f6b4a', { ink: 20, rot: [0, s * 0.5, 0] });
   }
 
   // Carved stone plaque "1930 – 1982" beside the door, at Dinda's hand height.
-  const plaquePos: Vec3 = [-0.12, 0.6, -0.88];
+  const plaquePos: Vec3 = [-0.12, 1.08, -0.88];
   kit.box(g, [0.78, 0.36, 0.05], [plaquePos[0], plaquePos[1], plaquePos[2] - 0.01], '#8a7a62', { ink: 20 });
   const carve = (glow: boolean): Paint => (c, w, h) => {
     if (!glow) {
@@ -691,8 +794,8 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
     c.fillText('?', w / 2, h / 2 + h * 0.04);
   });
   const qMat = kit.track(new THREE.MeshBasicMaterial({ map: qTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
-  const question = kit.mesh(g, new THREE.PlaneGeometry(0.75, 0.75), qMat, [0.5, 1.78, -0.7], { ink: false, shadow: false });
-  const qGlow = kit.glow(g, '#ffb84a', 2.2, [0.5, 1.78, -0.66], 0);
+  const question = kit.mesh(g, new THREE.PlaneGeometry(0.75, 0.75), qMat, [0.5, 2.32, -0.7], { ink: false, shadow: false });
+  const qGlow = kit.glow(g, '#ffb84a', 2.2, [0.5, 2.32, -0.66], 0);
 
   const swing = lantern(kit, g, [-1.1, 4.0, -0.35], 0.75, 3, 4.5);
   // Dry leaves: some flat on the cement, some tumbling through the foreground.
@@ -749,7 +852,7 @@ function buildStationRear(kit: WorldKit, variant: string): WorldScene {
       const pop = finale ? 1 + 0.25 * Math.exp(-Math.max(0, progress - 0.56) * 30) * Math.sin(Math.max(0, progress - 0.5) * 60) : 1;
       qMat.opacity = q;
       question.scale.setScalar(Math.max(0.01, q * pop));
-      question.position.y = 1.78 + Math.sin(frame * 0.06) * 0.03;
+      question.position.y = 2.32 + Math.sin(frame * 0.06) * 0.03;
       qGlow.material.opacity = q * (0.6 + 0.2 * Math.sin(frame * 0.1));
     },
   };
@@ -772,7 +875,7 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   kit.box(g, [22, 0.1, 3.9], [0, 3.75, -2.9], '#6a5a4a', { ink: 20, rot: [0.05, 0, 0] });
 
   // The elevation sign, chunky 3D cartoon board.
-  carvedSign(kit, g, ['CIKAJANG', '1.246 MDPL'], [1.4, 0.68], [-1.05, 1.62, -1.8], 0.18);
+  carvedSign(kit, g, ['CIKAJANG', '1.246 MDPL'], [1.4, 0.68], [-1.35, 2.08, -1.75], 0.18);
 
   mountains(kit, g, [
     { x: -6, z: -80, r: 40, h: 34, color: '#56705a' },
@@ -782,6 +885,8 @@ function buildPlatformMist(kit: WorldKit): WorldScene {
   ]);
   grass(kit, g, { min: [-40, 0, 2.6], max: [40, 0, 40], count: 1600, size: 0.5, seed: 43, colors: ['#5a7a3a', '#6e8e48', '#4a6a30'] });
   grass(kit, g, { min: [-16, 0.4, -4.8], max: [16, 0.4, -4.4], count: 120, size: 0.25, seed: 44, colors: ['#5a7a3a', '#6e8e48'] });
+  peronBench(kit, g, [2.8, 0.4, -4.3], 1.8);
+  peronBench(kit, g, [-4.4, 0.4, -4.3], 1.8);
   const fog = fogBank(kit, g, 26, { min: [-18, 0.6, -14], max: [18, 3.5, 0.5] }, '#e8ecf0', 45);
   const fog2 = fogBank(kit, g, 18, { min: [-60, 5, -70], max: [60, 18, -30] }, '#f0f2f4', 46);
   // Layered mountain silhouettes (near ridge → Cikuray → distant Papandayan), mist between layers.
@@ -870,7 +975,7 @@ function buildLadang(kit: WorldKit): WorldScene {
       fog(frame);
       steamUpdate(breath, localFrame, 9, 40, (birth) => {
         const alt = Math.floor(birth / 9) % 2 === 0;
-        return alt ? v3(-4.3 + farmerX(clamp01(birth / 299)) + 0.1, 0.72, 0.45) : v3(-0.95, 1.08, -1.3);
+        return alt ? v3(-4.3 + farmerX(clamp01(birth / 299)) + 0.1, 1.12, 0.45) : v3(-0.95, 1.46, -1.3);
       }, { rise: 0.05, drift: 0.008, grow: 0.012, opacity: 0.35 });
       void progress;
     },
@@ -887,15 +992,11 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   kit.shaft(g, [-1.9, 1.9, -3.0], [-0.4, 0.3, -0.6], 0.9, '#ffe6b0', 0.22);
   const motes = kit.motes(g, { from: [-1.9, 1.9, -3.0], to: [-0.4, 0.3, -0.6], radius: 0.9, count: 160, color: '#fff0c8', seed: 62 });
 
-  const s = 1.1;
-  const deskTop = DESK_TOP;
-  /** Bust base raised so the desk line on the canvas meets the desk top. */
-  const deskBase = deskTop - DESK_LINE * s;
+  const s = 1.15;
+  const deskTop = DESK_HEIGHT * s;
   // Open-frame desk (legs visible underneath) whose back edge sits just in front of the seated billboard.
   table(kit, g, [0, 0, -0.8], [1.6, deskTop, 0.8], '#6a4228');
-  // Front modesty panel hides the raised bust base, as in the Persis study desk.
-  kit.box(g, [1.6, deskTop - 0.12, 0.04], [0, (deskTop - 0.12) / 2 + 0.06, -0.42], '#5a3820', { ink: 20 });
-  chair(kit, g, [0, 0, -1.55], deskBase, '#5a3820');
+  chair(kit, g, [0, 0, -1.5], SEAT_HEIGHT * s, '#5a3820');
   // Desk-top props (no pens here: the only pen is in the station master's hand).
   const cal = new THREE.Group();
   cal.position.set(-0.66, deskTop, -0.48);
@@ -909,7 +1010,7 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   for (let i = 0; i < 3; i++) kit.box(g, [0.26, 0.05, 0.34], [-0.62, deskTop + 0.025 + i * 0.05, -1.0], ['#5a2a22', '#2a3a5a', '#3a4a2a'][i] ?? '#5a2a22', { ink: 10 });
 
   // Corner bench for the newspaper reader.
-  bench(kit, g, [2.4, 0, -2.75], 1.3, SEAT_HEIGHT, '#5a3820');
+  bench(kit, g, [2.4, 0, -2.75], 1.3, SEAT_HEIGHT * 1.15, '#5a3820');
   // Wall dressing.
   kit.label(g, ['STAATSSPOORWEGEN', 'IN NEDERLANDSCH-INDIË'], [1.5, 0.5], [1.3, 2.25, -3.08], { bg: '#efe3c4', fg: '#3a2412', border: '#7a2c20', font: '800 {size}px Georgia, serif' });
   kit.label(g, ['LIJN GAROET – TJIKADJANG'], [1.6, 0.36], [-2.0, 2.75, -3.08], { bg: '#e8dcbc', fg: '#2a2a3a', font: '700 {size}px Georgia, serif' });
@@ -923,7 +1024,7 @@ function buildOffice1930(kit: WorldKit): WorldScene {
   return {
     id: 'office1930',
     group: g,
-    anchors: { desk: v3(0, deskBase, -1.24), corner: v3(2.4, SEAT_HEIGHT, -2.66) },
+    anchors: { desk: v3(0, 0, -1.24), corner: v3(2.4, 0, -2.5) },
     background: new THREE.Color('#2a2018'),
     fog: new THREE.Fog('#3a2c20', 12, 40),
     update: ({ frame }) => {
@@ -946,11 +1047,13 @@ function buildCibatu(kit: WorldKit): WorldScene {
   facade(kit, g, { x0: -14, x1: 16, face: -4.8, h: 4.2, wall: '#ece0c4', roof: '#7a3a2a', depth: 6 });
   for (const x of [-9, -6, -1.5, 3, 7, 11]) door(kit, g, x, -4.8, 1.2, 2.6, '#5a4028', 0.45);
   kit.label(g, ['TJIBATOE'], [2.4, 0.42], [1.5, 3.6, -4.74], { bg: '#efe3c4', fg: '#1d2a4a', font: '800 {size}px Georgia, serif', border: '#1d2a4a' });
+  peronBench(kit, g, [-3.6, 0.45, -4.15], 2.0);
+  peronBench(kit, g, [5.6, 0.45, -4.15], 2.0);
   for (let x = -12; x <= 16; x += 4) for (const z of [-0.9, -4.0]) kit.cyl(g, 0.07, 0.08, 3.2, [x, 0.45 + 1.6, z], '#2c3440', { seg: 10 });
   kit.box(g, [30, 0.1, 4.0], [2, 3.7, -2.45], '#5a4a3a', { ink: 20 });
-  kit.cyl(g, 0.012, 0.012, 0.6, [0.5, 3.4, -2.0], PALETTE.ink, { seg: 4, ink: false });
-  const tick = clock(kit, g, [0.5, 2.8, -2.0], 0.3, 6, 4, '06.04');
-  kit.label(g, ['06.04  ➜  GAROET'], [1.2, 0.22], [0.5, 2.36, -2.0], { bg: '#1d2a3a', fg: '#f6e6b0', font: '800 {size}px Georgia, serif' });
+  kit.cyl(g, 0.012, 0.012, 0.22, [0.5, 3.55, -2.0], PALETTE.ink, { seg: 4, ink: false });
+  const tick = clock(kit, g, [0.5, 3.2, -2.0], 0.3, 6, 4, '06.04');
+  kit.label(g, ['06.04  ➜  GAROET'], [1.2, 0.22], [0.5, 2.76, -2.0], { bg: '#1d2a3a', fg: '#f6e6b0', font: '800 {size}px Georgia, serif' });
 
   const loco = steamLoco(kit, g);
   const coach1 = carriage(kit, g, '#5a3a2a');
@@ -1001,8 +1104,8 @@ function buildCarriage(kit: WorldKit): WorldScene {
   kit.box(g, [18, 0.6, 0.12], [0, 2.2, -1.36], wall, { ink: 10 });
   for (let x = -8.5; x <= 8.5; x += 1.4) kit.box(g, [0.24, 0.82, 0.14], [x, 1.49, -1.36], wall, { ink: 10 });
   // Longitudinal bench along the back wall.
-  kit.box(g, [18, 0.06, 0.44], [0, SEAT_HEIGHT - 0.03, -1.05], wood, { ink: 20 });
-  kit.box(g, [18, SEAT_HEIGHT - 0.06, 0.06], [0, (SEAT_HEIGHT - 0.06) / 2, -0.86], shadeHex(wood, -0.2), { ink: 20 });
+  kit.box(g, [18, 0.06, 0.44], [0, SEAT_HEIGHT * 1.15 - 0.03, -1.05], kit.toon('#ffffff', { map: kit.canvas(512, 128, rottenPlanksPaint('#7a5032', 81), { repeat: [12, 1] }) }), { ink: 20 });
+  kit.box(g, [18, SEAT_HEIGHT * 1.15 - 0.06, 0.06], [0, (SEAT_HEIGHT * 1.15 - 0.06) / 2, -0.86], shadeHex(wood, -0.2), { ink: 20 });
   kit.box(g, [18, 0.06, 0.1], [0, 0.95, -1.27], wood, { ink: 10 });
   // Luggage rack + straps.
   kit.box(g, [18, 0.03, 0.36], [0, 2.1, -1.1], '#4a3a2a', { ink: 10 });
@@ -1034,7 +1137,7 @@ function buildCarriage(kit: WorldKit): WorldScene {
   return {
     id: 'carriage',
     group: g,
-    anchors: { seat1: v3(-4.3, SEAT_HEIGHT, -1.0), seat2: v3(-3.0, SEAT_HEIGHT, -1.0), seat3: v3(-1.6, SEAT_HEIGHT, -1.0), seat4: v3(-0.35, 0, -0.62), seat5: v3(1.4, SEAT_HEIGHT, -1.0), seat6: v3(2.9, SEAT_HEIGHT, -1.0) },
+    anchors: { seat1: v3(-4.3, 0, -0.78), seat2: v3(-3.0, 0, -0.78), seat3: v3(-1.6, 0, -0.78), seat4: v3(-0.35, 0, -0.62), seat5: v3(1.4, 0, -0.78), seat6: v3(2.9, 0, -0.78) },
     background: new THREE.Color('#3a2a1e'),
     fog: new THREE.Fog('#6a5440', 10, 40),
     update: ({ frame }) => {
@@ -1060,7 +1163,7 @@ function buildGarut1935(kit: WorldKit): WorldScene {
   for (const x of [-10, -6.5, 1.5]) door(kit, g, x, -4.6, 1.2, 2.6, '#5a4028', 0.45);
   kit.label(g, ['GAROET'], [2.0, 0.42], [-4.5, 3.4, -4.54], { bg: '#efe3c4', fg: '#1d2a4a', font: '800 {size}px Georgia, serif', border: '#1d2a4a' });
   // Timetable board: "5x" daily Tjibatoe–Garoet.
-  const board = signBoard(kit, g, ['DIENSTREGELING 1935', 'TJIBATOE — GAROET', 'SETIAP HARI'], [1.5, 1.0], [-1.4, 1.35, -2.75], { bg: '#1f2a24', fg: '#f2ead0', border: '#5a3a24' });
+  const board = signBoard(kit, g, ['DIENSTREGELING 1935', 'TJIBATOE — GAROET', 'SETIAP HARI'], [1.5, 1.0], [-1.55, 1.95, -2.75], { bg: '#1f2a24', fg: '#f2ead0', border: '#5a3a24' });
   kit.label(board, ['5x'], [0.5, 0.36], [0.48, -0.26, 0.03], { bg: '#f6c453', fg: '#2a1a10', font: '800 {size}px Georgia, serif' });
   // 1947 repair site further down the line.
   for (let i = 0; i < 6; i++) kit.box(g, [0.22, 0.12, 2.0], [10.6 + (i % 2) * 0.1, 0.06 + Math.floor(i / 2) * 0.12, -1.0 - (i % 2) * 0.05], '#5a3e28', { ink: 20, rot: [0, Math.PI / 2, 0] });
@@ -1105,7 +1208,7 @@ function buildOffice1980(kit: WorldKit): WorldScene {
   loco.group.rotation.y = 0.15;
   kit.backdrop(g, [200, 70], [0, 20, -60], sky({ stops: [[0, '#5a5a6a'], [0.6, '#9a9488'], [1, '#6a6458']], ridges: CIKURAY_RIDGES('#4a5048', '#3e443c'), seed: 10 }), 4);
   // Furniture.
-  chair(kit, g, [0, 0, -1.2], SEAT_HEIGHT, '#4a3a2a');
+  chair(kit, g, [0, 0, -1.2], SEAT_HEIGHT * 1.15, '#4a3a2a');
   table(kit, g, [-1.4, 0, -1.6], [1.0, 0.76, 0.6], '#5a4a36');
   for (let i = 0; i < 4; i++) kit.box(g, [0.3, 0.04, 0.22], [-1.5 + (i % 2) * 0.1, 0.78 + i * 0.04, -1.6], '#d8d0b8', { ink: 10 });
   kit.label(g, ['PJKA', 'PERUSAHAAN JAWATAN KERETA API'], [1.2, 0.5], [-1.5, 2.1, -2.58], { bg: '#e6dcc0', fg: '#2a3a5a', border: '#2a3a5a', font: '800 {size}px Arial, sans-serif' });
@@ -1131,7 +1234,7 @@ function buildOffice1980(kit: WorldKit): WorldScene {
   return {
     id: 'office1980',
     group: g,
-    anchors: { chair: v3(0, SEAT_HEIGHT, -1.12) },
+    anchors: { chair: v3(0, 0, -0.92) },
     background: new THREE.Color('#2a2c26'),
     fog: new THREE.Fog('#3a3c34', 14, 60),
     update: ({ frame }) => {
@@ -1156,10 +1259,10 @@ function buildGarut1982(kit: WorldKit): WorldScene {
   for (let z = 2; z >= -20; z -= 4) kit.cyl(g, 0.07, 0.08, 3.1, [-4.8, 0.45 + 1.55, z], '#3a3a3a', { seg: 10 });
   kit.box(g, [3, 0.1, 24], [-5, 3.6, -9], '#5a5048', { ink: 20 });
   // Pole + the "DITUTUP" sign, just hung and still swinging.
-  kit.cyl(g, 0.05, 0.06, 1.6, [0.42, 0.45 + 0.8, -1.25], '#3a3a3a', { seg: 8 });
-  kit.box(g, [0.5, 0.05, 0.05], [0.3, 0.45 + 1.49, -1.25], '#3a3a3a');
+  kit.cyl(g, 0.05, 0.06, 1.9, [0.42, 0.45 + 0.95, -1.25], '#3a3a3a', { seg: 8 });
+  kit.box(g, [0.5, 0.05, 0.05], [0.3, 0.45 + 1.78, -1.25], '#3a3a3a');
   const pivot = new THREE.Group();
-  pivot.position.set(0.3, 0.45 + 1.46, -1.22);
+  pivot.position.set(0.3, 0.45 + 1.75, -1.22);
   g.add(pivot);
   kit.cyl(pivot, 0.004, 0.004, 0.2, [-0.22, -0.1, 0], PALETTE.ink, { seg: 4, ink: false });
   kit.cyl(pivot, 0.004, 0.004, 0.2, [0.22, -0.1, 0], PALETTE.ink, { seg: 4, ink: false });
@@ -1305,8 +1408,8 @@ function buildCikajangToday(kit: WorldKit): WorldScene {
     c.fillStyle = 'rgba(60,90,40,0.55)';
     for (let i = 0; i < 18; i++) c.fillRect(r() * w, h * (0.8 + r() * 0.2), 30 + r() * 50, 12);
   });
-  kit.box(g, [1.32, 0.38, 0.06], [17.5, 0.92, -3.7], '#7a6a52', { ink: 20 });
-  kit.mesh(g, new THREE.PlaneGeometry(1.24, 0.3), kit.toon('#ffffff', { map: carve }), [17.5, 0.92, -3.665], { ink: false, shadow: false });
+  kit.box(g, [1.32, 0.38, 0.06], [17.4, 1.18, -3.7], '#7a6a52', { ink: 20 });
+  kit.mesh(g, new THREE.PlaneGeometry(1.24, 0.3), kit.toon('#ffffff', { map: carve }), [17.4, 1.18, -3.665], { ink: false, shadow: false });
   // Wild grass everywhere: field, platform cracks, against the wall.
   const grassCols = ['#5a8a3a', '#72a048', '#4a7430', '#8aa850'];
   grass(kit, g, { min: [-40, 0, 2.3], max: [40, 0, 30], count: 2600, size: 0.55, seed: 123, colors: grassCols });
@@ -1318,6 +1421,8 @@ function buildCikajangToday(kit: WorldKit): WorldScene {
     const x = -24 + i * 3.6;
     kit.mesh(g, new THREE.PlaneGeometry(0.8, 1.6), kit.track(new THREE.MeshToonMaterial({ map: grassTexture(kit, 140 + i, grassCols), gradientMap: kit.gradient, alphaTest: 0.5, side: THREE.DoubleSide })), [x, 1.15, -3.66], { ink: false, shadow: false });
   }
+  peronBench(kit, g, [-6, 0.35, -3.25], 2.0);
+  peronBench(kit, g, [7, 0.35, -3.25], 2.0);
   const butterflies = Array.from({ length: 5 }, (_, i) => ({ s: kit.glow(g, ['#ffffff', '#f2c230', '#f08a3a'][i % 3] ?? '#ffffff', 0.12, [0, 0, 0], 0.9), i }));
   mountains(kit, g, [{ x: -8, z: -85, r: 40, h: 34, color: '#4e7a5a' }, { x: 30, z: -95, r: 32, h: 24, color: '#4a7258' }]);
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#4a8ad0'], [0.55, '#9cc8ec'], [0.8, '#d4e8f4'], [1, '#a8c8b0']], clouds: { color: 'rgba(255,255,255,0.9)', count: 26, y: 0.3 }, ridges: CIKURAY_RIDGES('#5a8a72', '#4e7e5e'), seed: 12 }), 3);
@@ -1417,12 +1522,12 @@ function buildGarut2022(kit: WorldKit): WorldScene {
     c.fillText('rencana reaktivasi', 700, 470);
   });
   const mapG = new THREE.Group();
-  mapG.position.set(-1.55, 1.3, -2.5);
+  mapG.position.set(-1.55, 1.85, -2.5);
   mapG.rotation.y = 0.12;
   g.add(mapG);
   kit.box(mapG, [1.72, 1.0, 0.06], [0, 0, -0.035], '#3a4a5a', { ink: 20 });
   kit.mesh(mapG, new THREE.PlaneGeometry(1.6, 0.9), kit.toon('#ffffff', { map }), [0, 0, 0.0], { ink: false, shadow: false });
-  for (const s of [-1, 1]) kit.cyl(g, 0.04, 0.04, 0.85, [-1.55 + s * 0.7, 0.45 + 0.42, -2.6], '#3a4a5a', { seg: 8 });
+  for (const s of [-1, 1]) kit.cyl(g, 0.04, 0.04, 1.4, [-1.55 + s * 0.7, 0.45 + 0.7, -2.6], '#3a4a5a', { seg: 8 });
   const train = modernTrain(kit, g);
   const xAt = (p: number): number => lerp(40, 1.2, easeOutCubic(smoothstep(0.35, 0.95, p)));
   kit.backdrop(g, [400, 140], [0, 40, -120], sky({ stops: [[0, '#3a7ad0'], [0.55, '#8cc0ec'], [0.8, '#d0e6f4'], [1, '#a8c0b0']], clouds: { color: 'rgba(255,255,255,0.9)', count: 24, y: 0.3 }, ridges: CIKURAY_RIDGES('#5a8a72', '#4e7e5e'), seed: 13 }), 3);
@@ -1488,6 +1593,7 @@ uniform float dip;
 uniform float sepia;
 uniform float grey;
 uniform float tone;
+uniform float flash;
 
 float linearDepth(vec2 uv) {
   float z = texture2D(tDepth, uv).x * 2.0 - 1.0;
@@ -1532,8 +1638,11 @@ void main() {
   col = mix(col, vec3(l) * vec3(0.9, 0.94, 1.0) * 0.92, grey);
 
   vec2 vq = (vUv - 0.5) * vec2(0.95, 1.15);
-  col *= mix(0.58 - sepia * 0.06, 1.0, smoothstep(0.85, 0.25, length(vq)));
+  // Soft vignette (strength 0.22).
+  col *= 1.0 - 0.22 * smoothstep(0.3, 0.85, length(vq));
   col = mix(col, vec3(0.012, 0.01, 0.02), dip);
+  // 6-frame white flash on era jumps.
+  col = mix(col, vec3(1.0, 0.98, 0.94), flash);
 
   col = toSRGB(clamp(col, 0.0, 1.0));
   float grain = 0.035 + sepia * 0.03;
@@ -1549,6 +1658,7 @@ export interface FilmParams {
   sepia: number;
   grey: number;
   tone: number;
+  flash: number;
 }
 
 export class FilmPipeline {
@@ -1576,6 +1686,7 @@ export class FilmPipeline {
         sepia: { value: 0 },
         grey: { value: 0 },
         tone: { value: 0.4 },
+        flash: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -1620,6 +1731,7 @@ export class FilmPipeline {
     set('sepia', params.sepia);
     set('grey', params.grey);
     set('tone', params.tone);
+    set('flash', params.flash);
     renderer.render(this.quadScene, this.quadCamera);
   }
 

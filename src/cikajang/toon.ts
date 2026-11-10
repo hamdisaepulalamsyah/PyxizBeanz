@@ -1,46 +1,61 @@
 import * as THREE from 'three';
-import type { ArmPose, Expression, HandProp, BodyProp, LookId } from './story';
+import type { ArmPose, BodyPose, Expression, HandProp, BodyProp, LookId } from './story';
 import { clamp01, hash01, lerp, smoothstep } from './story';
 
 /**
- * Bean-head cast for "Sejarah Cikajang" — built to the `pyxis-beanhead-style`
- * skill (skills/pyxis-beanhead-style/SKILL.md), i.e. the same construction as
- * the Persis cast (src/persis/toon.ts):
+ * Full-figure bean-head cast for "Sejarah Cikajang", built to the
+ * `pyxis-beanhead-style` skill (skills/pyxis-beanhead-style/SKILL.md):
  *
- *  - waist-up bust billboard, 768 × 1024 canvas, 0.9 × 1.2 m plane,
- *  - `traceBeanHead` superellipse head (HEAD_HALF_W 240, ratio 0.94), plum ink,
- *  - lit MeshToonMaterial + ellipsoid/cylinder normal map so 3D lights fall on it,
- *  - clean cartoon mitten hands on smooth rubber-hose arms (one bezier from
- *    shoulder to wrist — no jointed pipes). Both arms are always painted; a
- *    gesture only moves the wrist target, so hands never pop in or vanish.
+ *  - the Persis bean head (`traceBeanHead`, HEAD_HALF_W 240, ratio 0.94, plum
+ *    ink) drawn at HEAD_SCALE so it is ≈ 236 px wide on a 768 × 1024 card,
+ *  - chibi proportions: torso ≈ 1.1 × head height, legs ≈ 1.35 × head height,
+ *    tidy trousers / skirts and cartoon shoes whose soles sit on SOLE = 975,
+ *    which is the billboard origin (y = 0, the floor),
+ *  - clean mitten hands on smooth rubber-hose arms (one bezier from shoulder to
+ *    wrist). Both arms are always painted; a gesture only moves the wrist target,
+ *    so hands never pop in or vanish,
+ *  - lit MeshToonMaterial + normal map, paper grain, NOINK card (no 3D ink lines).
  *
  * Every value is a pure function of the frame so any frame renders on its own.
  */
 
-// ── Canvas & proportions (pyxis-beanhead-style) ─────────────────────────────
+// ── Canvas & proportions (pyxis-beanhead-style, full figure) ────────────────
 
 const LW = 768;
 const LH = 1024;
 const TEXTURE_SCALE = 0.75;
-export const ACTOR_PLANE_WIDTH = 0.9;
-export const ACTOR_PLANE_HEIGHT = 1.2;
+/** Shoe-sole line on the card; it sits exactly on the floor (billboard origin). */
+const SOLE = 975;
+export const ACTOR_PLANE_HEIGHT = 1.7;
+export const ACTOR_PLANE_WIDTH = (ACTOR_PLANE_HEIGHT * LW) / LH;
 const PX = LH / ACTOR_PLANE_HEIGHT;
 
 const PLUM = '#241726';
 const HEAD_CX = LW / 2;
-const HEAD_CY = 380;
+/** Persis head units (the head is authored at Persis size and scaled down). */
 const HEAD_HALF_W = 240;
 /** Head bounding box height/width = 0.94 (pointed-crown superellipse). */
 const HEAD_HALF_H = (HEAD_HALF_W * 2 * 0.94) / 2;
+/** Card head half-width ≈ 118 px → head width ≈ 236 px. */
+const HEAD_SCALE = 118 / HEAD_HALF_W;
+const HEAD_H_PX = HEAD_HALF_H * 2 * HEAD_SCALE;
 const OUTLINE = 11;
-const TORSO_TOP = HEAD_CY + 190;
-/** Hand centres stay this far inside the canvas so mittens and props never clip. */
-const HAND_MARGIN = 56;
+/** Legs ≈ 1.35 × head height down to the sole; torso ≈ 1.1 × head height above the hips. */
+const HIP_Y = SOLE - HEAD_H_PX * 1.35;
+const TORSO_TOP = HIP_Y - HEAD_H_PX * 1.1;
+const HEAD_CY = TORSO_TOP - HEAD_HALF_H * HEAD_SCALE + 8;
+/** Seated hip line (thighs foreshortened toward camera). */
+const SEAT_Y = HIP_Y + 40;
+/** Desk line on the card for seated writing poses. */
+const DESK_Y = SEAT_Y - 115;
+/** Seat / desk heights in metres at scale 1 (multiply by the character scale in worlds). */
+export const SEAT_HEIGHT = (SOLE - SEAT_Y) / PX;
+export const DESK_HEIGHT = (SOLE - DESK_Y) / PX;
+/** Hand centres stay this far inside the card so mittens and props never clip. */
+const HAND_MARGIN = 44;
+/** Mittens and hand props are authored at Persis size and drawn at this scale. */
+const HAND_SCALE = 0.55;
 
-/** Canvas line where a desk top meets the bust (writing poses). */
-const DESK_Y = 760;
-/** Height of that desk line above the billboard origin, in metres at scale 1. */
-export const DESK_LINE = (LH - DESK_Y) / PX;
 
 // ── Looks ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +88,11 @@ interface HumanLook {
   browColor: string;
   /** Backpack colour (straps over the shoulders), or null. */
   pack: string | null;
+  bottom: 'pants' | 'skirt' | 'sarung';
+  bottomColor: string;
+  shoes: 'sneakers' | 'boots' | 'shoes' | 'sandals';
+  shoeUpper: string;
+  shoeAccent: string;
 }
 
 interface CritterLook {
@@ -102,29 +122,34 @@ const human = (l: Partial<HumanLook> & Pick<HumanLook, 'skin' | 'headwear' | 'ou
   lashes: l.headwear.kind === 'hijab' || (l.headwear.kind === 'hair' && l.headwear.style === 'bun'),
   browColor: '#1f1615',
   pack: null,
+  bottom: 'pants',
+  bottomColor: '#3a3440',
+  shoes: 'shoes',
+  shoeUpper: '#1d1a1a',
+  shoeAccent: '#d9a441',
   ...l,
 });
 
 export const LOOKS: Record<LookId, Look> = {
-  dinda: human({ skin: '#e2b088', headwear: { kind: 'hijab', color: '#d9a441' }, outfit: 'jacket', cloth: '#5b7fb5', accent: '#fbf8f1', browColor: '#3a2620', pack: '#c4553d' }),
-  petani: human({ skin: '#b97f57', headwear: { kind: 'caping', color: '#d8b878' }, outfit: 'lurik', cloth: '#6b5a44', mustache: true }),
-  kepalaStasiun: human({ skin: '#d6a074', headwear: { kind: 'stationCap', color: '#f1ece0' }, outfit: 'uniform', cloth: '#ece5d3', accent: '#c9a14a', mustache: true, glasses: true }),
-  stafKoran: human({ skin: '#c99068', headwear: { kind: 'peci', tilt: 0.04 }, outfit: 'kemeja', cloth: '#d9cfb8' }),
-  kondektur: human({ skin: '#cf9a70', headwear: { kind: 'kepi', color: '#2d3550', band: '#d9b45a' }, outfit: 'uniform', cloth: '#34405e', accent: '#d9b45a', mustache: true }),
-  penumpangPria: human({ skin: '#c99068', headwear: { kind: 'hair', style: 'short' }, outfit: 'kemeja', cloth: '#e8e2d2' }),
-  penumpangWanita: human({ skin: '#d9a77c', headwear: { kind: 'hair', style: 'bun' }, outfit: 'kebaya', cloth: '#d98c7a' }),
-  ibuBakul: human({ skin: '#c48a62', headwear: { kind: 'hijab', color: '#7a8f6a' }, outfit: 'kebaya', cloth: '#c9b48a' }),
-  bapakPeci: human({ skin: '#b98058', headwear: { kind: 'peci', tilt: 0 }, outfit: 'koko', cloth: '#f0ebe0', beard: 'goatee', mustache: true }),
-  petugas1935: human({ skin: '#d0986e', headwear: { kind: 'stationCap', color: '#ece6d6' }, outfit: 'uniform', cloth: '#e8e0cc', accent: '#c9a14a' }),
-  pekerjaRel: human({ skin: '#a87250', headwear: { kind: 'caping', color: '#cfae6e' }, outfit: 'kaos', cloth: '#8a6e4e' }),
-  pekerjaRel2: human({ skin: '#b37a54', headwear: { kind: 'hair', style: 'short' }, outfit: 'lurik', cloth: '#5c4c3c', mustache: true }),
-  petugas1980: human({ skin: '#cf9a70', headwear: { kind: 'kepi', color: '#3c4636', band: '#d8c070' }, outfit: 'uniform', cloth: '#8f9a7a', accent: '#d8c070', mustache: true, glasses: true }),
-  petugas1982: human({ skin: '#c58f66', headwear: { kind: 'stationCap', color: '#d9d3c0' }, outfit: 'uniform', cloth: '#a19a7c', accent: '#d8c070' }),
-  anak: human({ skin: '#d6a074', headwear: { kind: 'hair', style: 'kid' }, outfit: 'kaos', cloth: '#d65a4a' }),
-  anakModern: human({ skin: '#d8a478', headwear: { kind: 'hair', style: 'kid' }, outfit: 'kaos', cloth: '#f2c230' }),
-  warga: human({ skin: '#be855d', headwear: { kind: 'caping', color: '#d2b072' }, outfit: 'kebaya', cloth: '#8a7a5a' }),
-  penumpangModern: human({ skin: '#cf9a70', headwear: { kind: 'cap', color: '#2e2e36' }, outfit: 'polo', cloth: '#3d8a8a' }),
-  penumpangModern2: human({ skin: '#dcab80', headwear: { kind: 'hijab', color: '#c25a7a' }, outfit: 'kemeja', cloth: '#ece3d4', pack: '#3f5f8a' }),
+  dinda: human({ skin: '#e2b088', headwear: { kind: 'hijab', color: '#d9a441' }, outfit: 'jacket', cloth: '#5b7fb5', accent: '#fbf8f1', browColor: '#3a2620', pack: '#c4553d', bottomColor: '#2e3346', shoes: 'sneakers', shoeUpper: '#d2493f', shoeAccent: '#fbf7ee' }),
+  petani: human({ skin: '#b97f57', headwear: { kind: 'caping', color: '#d8b878' }, outfit: 'lurik', cloth: '#6b5a44', mustache: true, bottomColor: '#3d3a35', shoes: 'boots', shoeUpper: '#2b2b2b' }),
+  kepalaStasiun: human({ skin: '#d6a074', headwear: { kind: 'stationCap', color: '#f1ece0' }, outfit: 'uniform', cloth: '#ece5d3', accent: '#c9a14a', mustache: true, glasses: true, bottomColor: '#e2dac6' }),
+  stafKoran: human({ skin: '#c99068', headwear: { kind: 'peci', tilt: 0.04 }, outfit: 'kemeja', cloth: '#d9cfb8', bottomColor: '#5a4a3a', shoeUpper: '#2a201a' }),
+  kondektur: human({ skin: '#cf9a70', headwear: { kind: 'kepi', color: '#2d3550', band: '#d9b45a' }, outfit: 'uniform', cloth: '#34405e', accent: '#d9b45a', mustache: true, bottomColor: '#2c3550' }),
+  penumpangPria: human({ skin: '#c99068', headwear: { kind: 'hair', style: 'short' }, outfit: 'kemeja', cloth: '#e8e2d2', bottom: 'sarung', bottomColor: '#6a3b2e', shoes: 'sandals', shoeUpper: '#5a3a24' }),
+  penumpangWanita: human({ skin: '#d9a77c', headwear: { kind: 'hair', style: 'bun' }, outfit: 'kebaya', cloth: '#d98c7a', bottom: 'skirt', bottomColor: '#5b3a2a', shoes: 'sandals', shoeUpper: '#6a4128' }),
+  ibuBakul: human({ skin: '#c48a62', headwear: { kind: 'hijab', color: '#7a8f6a' }, outfit: 'kebaya', cloth: '#c9b48a', bottom: 'skirt', bottomColor: '#4a3426', shoes: 'sandals', shoeUpper: '#5a3a24' }),
+  bapakPeci: human({ skin: '#b98058', headwear: { kind: 'peci', tilt: 0 }, outfit: 'koko', cloth: '#f0ebe0', beard: 'goatee', mustache: true, bottom: 'sarung', bottomColor: '#3e4a6a', shoes: 'sandals', shoeUpper: '#4a3020' }),
+  petugas1935: human({ skin: '#d0986e', headwear: { kind: 'stationCap', color: '#ece6d6' }, outfit: 'uniform', cloth: '#e8e0cc', accent: '#c9a14a', bottomColor: '#e0d8c4' }),
+  pekerjaRel: human({ skin: '#a87250', headwear: { kind: 'caping', color: '#cfae6e' }, outfit: 'kaos', cloth: '#8a6e4e', bottomColor: '#3a3a3a', shoes: 'boots', shoeUpper: '#2a2624' }),
+  pekerjaRel2: human({ skin: '#b37a54', headwear: { kind: 'hair', style: 'short' }, outfit: 'lurik', cloth: '#5c4c3c', mustache: true, bottomColor: '#45403a', shoes: 'boots', shoeUpper: '#262220' }),
+  petugas1980: human({ skin: '#cf9a70', headwear: { kind: 'kepi', color: '#3c4636', band: '#d8c070' }, outfit: 'uniform', cloth: '#8f9a7a', accent: '#d8c070', mustache: true, glasses: true, bottomColor: '#3a3f36' }),
+  petugas1982: human({ skin: '#c58f66', headwear: { kind: 'stationCap', color: '#d9d3c0' }, outfit: 'uniform', cloth: '#a19a7c', accent: '#d8c070', bottomColor: '#4a4a40' }),
+  anak: human({ skin: '#d6a074', headwear: { kind: 'hair', style: 'kid' }, outfit: 'kaos', cloth: '#d65a4a', bottomColor: '#3a4a6a', shoes: 'sandals', shoeUpper: '#3a5a8a' }),
+  anakModern: human({ skin: '#d8a478', headwear: { kind: 'hair', style: 'kid' }, outfit: 'kaos', cloth: '#f2c230', bottomColor: '#2e5c8a', shoes: 'sneakers', shoeUpper: '#3d8ad0', shoeAccent: '#fbf7ee' }),
+  warga: human({ skin: '#be855d', headwear: { kind: 'caping', color: '#d2b072' }, outfit: 'kebaya', cloth: '#8a7a5a', bottom: 'skirt', bottomColor: '#4f3b2c', shoes: 'sandals', shoeUpper: '#4a3020' }),
+  penumpangModern: human({ skin: '#cf9a70', headwear: { kind: 'cap', color: '#2e2e36' }, outfit: 'polo', cloth: '#3d8a8a', bottomColor: '#2a2a3a', shoes: 'sneakers', shoeUpper: '#2e2e36', shoeAccent: '#f2c230' }),
+  penumpangModern2: human({ skin: '#dcab80', headwear: { kind: 'hijab', color: '#c25a7a' }, outfit: 'kemeja', cloth: '#ece3d4', pack: '#3f5f8a', bottom: 'skirt', bottomColor: '#3a3a50', shoes: 'sneakers', shoeUpper: '#f0ece4', shoeAccent: '#c25a7a' }),
   ayam: { kind: 'critter', species: 'ayam', color: '#f3ead8', accent: '#d8402e' },
   kucing: { kind: 'critter', species: 'kucing', color: '#e39a4b', accent: '#b8672a' },
 };
@@ -201,6 +226,7 @@ export interface ToonDrive {
 }
 
 export interface ActorSetup {
+  pose: BodyPose;
   leftProp: HandProp;
   rightProp: HandProp;
   bodyProp: BodyProp;
@@ -264,9 +290,12 @@ type Pt = readonly [number, number];
 /** [0] = character's right arm (screen left), [1] = character's left arm (screen right). */
 const SIGN = [-1, 1] as const;
 
+/** Ink multiplier so scaled-down head/hand art keeps the same on-card line weight. */
+let inkMul = 1;
+
 function strokeOutline(ctx: CanvasRenderingContext2D, width = OUTLINE): void {
   ctx.strokeStyle = PLUM;
-  ctx.lineWidth = width;
+  ctx.lineWidth = width * inkMul;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.stroke();
@@ -302,148 +331,305 @@ function traceBeanHead(ctx: CanvasRenderingContext2D, scale = 1): void {
   ctx.closePath();
 }
 
-function traceTorso(ctx: CanvasRenderingContext2D, cx: number, top: number, breathScale: number): void {
-  const sw = 172 * breathScale;
-  const bw = 250;
-  ctx.beginPath();
-  ctx.moveTo(cx - bw, LH + 20);
-  ctx.lineTo(cx - sw - 12, top + 95);
-  ctx.quadraticCurveTo(cx - sw, top, cx - sw + 72, top - 6);
-  ctx.lineTo(cx + sw - 72, top - 6);
-  ctx.quadraticCurveTo(cx + sw, top, cx + sw + 12, top + 95);
-  ctx.lineTo(cx + bw, LH + 20);
-  ctx.closePath();
-}
-
-// ── Body ────────────────────────────────────────────────────────────────────
+// ── Body + legs ─────────────────────────────────────────────────────────────
 
 interface Frame {
+  pose: BodyPose;
   cx: number;
+  /** Torso top (collar line). */
   top: number;
+  hipY: number;
   breathScale: number;
   headX: number;
   headY: number;
+  /** Walking: per-leg shoe lift in px. */
+  lift: readonly [number, number];
 }
 
-function frameFor(pose: Pose): Frame {
-  const cx = HEAD_CX + pose.turn * 5;
+function frameFor(pose: Pose, body: BodyPose, walkPhase: number | null): Frame {
+  const cx = HEAD_CX + pose.turn * 3;
+  const seat = body === 'sit' ? SEAT_Y - HIP_Y : 0;
+  const bob = walkPhase === null ? 0 : -Math.abs(Math.sin(walkPhase)) * 8;
+  const lift = (i: number): number => (walkPhase === null || body === 'sit' ? 0 : Math.max(0, Math.sin(walkPhase + i * Math.PI)) * 22);
   return {
+    pose: body,
     cx,
-    top: TORSO_TOP + pose.breath + pose.bow * 6,
-    breathScale: 1 + pose.breathOpen * 0.016,
-    headX: HEAD_CX + pose.turn * 12,
-    headY: HEAD_CY + pose.breathHead + pose.bow * 22,
+    top: TORSO_TOP + seat + bob + pose.breath * 0.5 + pose.bow * 3,
+    hipY: HIP_Y + seat + bob,
+    breathScale: 1 + pose.breathOpen * 0.02,
+    headX: HEAD_CX + pose.turn * 6,
+    headY: HEAD_CY + seat + bob + pose.breathHead * 0.6 + pose.bow * 10,
+    lift: [lift(0), lift(1)],
   };
+}
+
+function traceTorso(ctx: CanvasRenderingContext2D, fr: Frame): void {
+  const sw = 90 * fr.breathScale;
+  const hem = fr.hipY + 22;
+  const top = fr.top;
+  const cx = fr.cx;
+  ctx.beginPath();
+  ctx.moveTo(cx - 100, hem);
+  ctx.lineTo(cx - sw - 6, top + 58);
+  ctx.quadraticCurveTo(cx - sw, top, cx - sw + 40, top - 4);
+  ctx.lineTo(cx + sw - 40, top - 4);
+  ctx.quadraticCurveTo(cx + sw, top, cx + sw + 6, top + 58);
+  ctx.lineTo(cx + 100, hem);
+  ctx.quadraticCurveTo(cx, hem + 12, cx - 100, hem);
+  ctx.closePath();
 }
 
 function drawPackBehind(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): void {
   if (!look.pack) return;
-  // Backpack shoulders peeking out behind the bust.
-  filled(ctx, () => ctx.roundRect(fr.cx - 226, fr.top - 46, 452, 380, 70), look.pack, 9);
-  const g = ctx.createLinearGradient(fr.cx - 226, 0, fr.cx + 226, 0);
-  g.addColorStop(0, 'rgba(255,230,200,0.25)');
+  const x = fr.cx - 116;
+  const y = fr.top - 26;
+  filled(ctx, () => ctx.roundRect(fr.cx - 30, y - 22, 60, 30, 14), shade(look.pack, -0.25), 7);
+  filled(ctx, () => ctx.roundRect(x, y, 232, fr.hipY - y - 30, 44), look.pack, 8);
+  const g = ctx.createLinearGradient(x, 0, x + 232, 0);
+  g.addColorStop(0, 'rgba(255,230,200,0.28)');
   g.addColorStop(0.4, 'rgba(255,230,200,0)');
-  g.addColorStop(1, 'rgba(30,10,20,0.35)');
+  g.addColorStop(1, 'rgba(30,10,20,0.38)');
   ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.roundRect(fr.cx - 220, fr.top - 40, 440, 368, 64);
+  ctx.roundRect(x + 4, y + 4, 224, fr.hipY - y - 38, 40);
   ctx.fill();
 }
 
+/** Trousers / skirt / sarung and cartoon shoes planted on SOLE. */
+function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): void {
+  const sit = fr.pose === 'sit';
+  const legs = SIGN.map((s, i) => {
+    const lift = fr.lift[i] ?? 0;
+    const hip: Pt = [fr.cx + s * 36, fr.hipY];
+    const knee: Pt = sit ? [fr.cx + s * 42, fr.hipY + 30] : [fr.cx + s * 38, lerp(fr.hipY, SOLE, 0.5) - lift * 0.5];
+    const ankle: Pt = [fr.cx + s * (sit ? 46 : 40), SOLE - 28 - lift];
+    return { s, hip, knee, ankle, lift };
+  });
+  const pants = look.bottom === 'pants' || look.bottom === 'sarung';
+  const legColor = pants ? look.bottomColor : look.skin;
+  const leg = (pts: readonly Pt[], width: number, color: string): void => {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    pts.forEach(([x, y], k) => (k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.strokeStyle = PLUM;
+    ctx.lineWidth = width + 12;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    // Soft form shade on the far side of each leg.
+    ctx.save();
+    ctx.translate(width * 0.2, 0);
+    ctx.beginPath();
+    pts.forEach(([x, y], k) => (k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.strokeStyle = 'rgba(30, 16, 40, 0.18)';
+    ctx.lineWidth = width * 0.38;
+    ctx.stroke();
+    ctx.restore();
+  };
+  for (const l of legs) leg([l.hip, l.knee, l.ankle], pants ? 50 : 30, legColor);
+  // Shoes (drawn after both legs so the near shoe overlaps cleanly).
+  for (const l of legs) drawShoe(ctx, look, l.ankle[0] + l.s * 12, SOLE - l.lift, l.s);
+  // Hip block / garment over the top of the legs.
+  if (look.bottom === 'pants') {
+    filled(ctx, () => ctx.roundRect(fr.cx - 76, fr.hipY - 34, 152, sit ? 64 : 70, 26), look.bottomColor, 9);
+    ctx.strokeStyle = shade(look.bottomColor, 0.2);
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 7]);
+    ctx.beginPath();
+    for (const l of legs) {
+      ctx.moveTo(l.hip[0] + l.s * 6, l.hip[1] + 26);
+      ctx.lineTo(l.knee[0] + l.s * 8, l.knee[1]);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else {
+    const hem = look.bottom === 'sarung' ? SOLE - 70 : sit ? fr.hipY + 150 : SOLE - 80;
+    const flare = sit ? 112 : look.bottom === 'sarung' ? 84 : 92;
+    const tube = (): void => {
+      ctx.moveTo(fr.cx - 78, fr.hipY - 34);
+      ctx.lineTo(fr.cx + 78, fr.hipY - 34);
+      ctx.lineTo(fr.cx + flare, hem);
+      ctx.quadraticCurveTo(fr.cx, hem + 12, fr.cx - flare, hem);
+      ctx.closePath();
+    };
+    filled(ctx, tube, look.bottomColor, 9);
+    ctx.save();
+    ctx.beginPath();
+    tube();
+    ctx.clip();
+    if (look.bottom === 'sarung') {
+      ctx.strokeStyle = shade(look.bottomColor, 0.25);
+      ctx.lineWidth = 6;
+      for (let x = fr.cx - 120; x < fr.cx + 120; x += 26) {
+        ctx.beginPath();
+        ctx.moveTo(x, fr.hipY - 40);
+        ctx.lineTo(x, hem + 20);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = shade(look.bottomColor, -0.3);
+      for (let y = fr.hipY - 30; y < hem + 20; y += 26) {
+        ctx.beginPath();
+        ctx.moveTo(fr.cx - 130, y);
+        ctx.lineTo(fr.cx + 130, y);
+        ctx.stroke();
+      }
+    } else {
+      // Batik kain dots.
+      ctx.fillStyle = shade(look.bottomColor, 0.3);
+      for (let y = fr.hipY - 20; y < hem + 10; y += 30) {
+        for (let x = fr.cx - 120 + ((y / 30) % 2 ? 15 : 0); x < fr.cx + 120; x += 30) {
+          ctx.beginPath();
+          ctx.ellipse(x, y, 5, 8, 0.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+  }
+}
+
+function drawShoe(ctx: CanvasRenderingContext2D, look: HumanLook, x: number, sole: number, s: number): void {
+  switch (look.shoes) {
+    case 'sneakers': {
+      // Rounded upper, thick white sole, plum-inked, laces + accent swoosh.
+      filled(ctx, () => ctx.ellipse(x, sole - 26, 46, 26, 0, 0, Math.PI * 2), look.shoeUpper, 8);
+      filled(ctx, () => ctx.roundRect(x - 52, sole - 18, 104, 18, 9), '#fbf7ee', 7);
+      ctx.strokeStyle = PLUM;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x - 46, sole - 9);
+      ctx.lineTo(x + 46, sole - 9);
+      ctx.stroke();
+      ctx.strokeStyle = '#fbf7ee';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let k = 0; k < 3; k++) {
+        ctx.moveTo(x - 14 + k * 10, sole - 46);
+        ctx.lineTo(x - 6 + k * 10, sole - 36);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = look.shoeAccent;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(x - s * 30, sole - 22);
+      ctx.quadraticCurveTo(x, sole - 30, x + s * 30, sole - 36);
+      ctx.stroke();
+      return;
+    }
+    case 'boots':
+      filled(ctx, () => ctx.roundRect(x - s * 12 - 30, sole - 120, 60, 112, 16), look.shoeUpper, 8);
+      filled(ctx, () => ctx.ellipse(x, sole - 18, 46, 20, 0, 0, Math.PI * 2), look.shoeUpper, 8);
+      filled(ctx, () => ctx.roundRect(x - 50, sole - 10, 100, 10, 5), shade(look.shoeUpper, -0.4), 6);
+      return;
+    case 'shoes':
+      filled(ctx, () => ctx.ellipse(x, sole - 20, 44, 21, 0, 0, Math.PI * 2), look.shoeUpper, 8);
+      filled(ctx, () => ctx.roundRect(x - 48, sole - 9, 96, 9, 4), '#1a1416', 5);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(x - s * 14, sole - 30, 12, 5, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case 'sandals':
+      filled(ctx, () => ctx.ellipse(x, sole - 16, 36, 15, 0, 0, Math.PI * 2), look.skin, 7);
+      filled(ctx, () => ctx.roundRect(x - 44, sole - 8, 88, 8, 4), look.shoeUpper, 6);
+      ctx.fillStyle = look.shoeUpper;
+      ctx.fillRect(x - 26, sole - 26, 52, 9);
+      return;
+  }
+}
+
 function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): void {
-  const { cx, top, breathScale } = fr;
+  const { cx, top } = fr;
+  const hem = fr.hipY + 22;
   ctx.fillStyle = look.skinShade;
-  ctx.fillRect(cx - 40, HEAD_CY + 150, 80, 80);
+  ctx.fillRect(cx - 20, fr.headY + 70, 40, top - fr.headY - 60);
 
   ctx.save();
-  traceTorso(ctx, cx, top, breathScale);
+  traceTorso(ctx, fr);
   ctx.fillStyle = look.cloth;
   ctx.fill();
   ctx.clip();
-  // Persis form shade on the far side.
+  // Persis form shade on the far side + warm light from the upper left.
   ctx.fillStyle = look.clothShade;
   ctx.beginPath();
-  ctx.ellipse(cx + 260, top + 270, 150, 330, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx + 118, top + 130, 62, 170, 0, 0, Math.PI * 2);
   ctx.fill();
-  const lit = ctx.createLinearGradient(cx - 250, top, cx + 40, top + 300);
-  lit.addColorStop(0, 'rgba(255, 238, 205, 0.18)');
+  const lit = ctx.createLinearGradient(cx - 110, top, cx + 20, top + 160);
+  lit.addColorStop(0, 'rgba(255, 238, 205, 0.2)');
   lit.addColorStop(1, 'rgba(255, 238, 205, 0)');
   ctx.fillStyle = lit;
-  ctx.fillRect(cx - 260, top - 20, 300, LH - top + 40);
-
+  ctx.fillRect(cx - 120, top - 10, 140, hem - top + 20);
   const v = (w: number, depth: number): void => {
     ctx.beginPath();
-    ctx.moveTo(cx - w, top - 8);
+    ctx.moveTo(cx - w, top - 6);
     ctx.lineTo(cx, top + depth);
-    ctx.lineTo(cx + w, top - 8);
+    ctx.lineTo(cx + w, top - 6);
     ctx.closePath();
   };
   switch (look.outfit) {
     case 'jacket': {
-      // Washed denim: twill + fades, open over a white tee.
       ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-      ctx.lineWidth = 3;
-      for (let k = -500; k < 500; k += 10) {
+      ctx.lineWidth = 2;
+      for (let k = -260; k < 260; k += 6) {
         ctx.beginPath();
-        ctx.moveTo(cx + k, top - 20);
-        ctx.lineTo(cx + k + 280, LH + 20);
+        ctx.moveTo(cx + k, top - 10);
+        ctx.lineTo(cx + k + 150, hem + 10);
         ctx.stroke();
       }
       ctx.fillStyle = 'rgba(220, 235, 255, 0.16)';
       ctx.beginPath();
-      ctx.ellipse(cx - 120, top + 260, 70, 160, -0.1, 0, Math.PI * 2);
+      ctx.ellipse(cx - 56, top + 140, 30, 80, -0.1, 0, Math.PI * 2);
       ctx.fill();
+      // White tee under the open jacket.
       ctx.fillStyle = look.accent;
       ctx.beginPath();
-      ctx.moveTo(cx - 70, top - 8);
-      ctx.lineTo(cx - 60, LH + 20);
-      ctx.lineTo(cx + 60, LH + 20);
-      ctx.lineTo(cx + 70, top - 8);
+      ctx.moveTo(cx - 34, top - 6);
+      ctx.lineTo(cx - 28, hem + 10);
+      ctx.lineTo(cx + 28, hem + 10);
+      ctx.lineTo(cx + 34, top - 6);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = 'rgba(200,190,175,0.6)';
-      ctx.lineWidth = 6;
-      ctx.beginPath();
-      ctx.arc(cx, top - 10, 56, 0.25, Math.PI - 0.25);
-      ctx.stroke();
-      // Lapels.
       ctx.fillStyle = look.clothShade;
       for (const s of SIGN) {
         ctx.beginPath();
-        ctx.moveTo(cx + s * 70, top - 8);
-        ctx.lineTo(cx + s * 64, top + 200);
-        ctx.lineTo(cx + s * 140, top + 70);
+        ctx.moveTo(cx + s * 34, top - 6);
+        ctx.lineTo(cx + s * 30, top + 96);
+        ctx.lineTo(cx + s * 70, top + 34);
         ctx.closePath();
         ctx.fill();
       }
-      // Chest pockets, rivets, stitching.
       ctx.strokeStyle = PLUM;
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 4;
       for (const s of SIGN) {
-        ctx.strokeRect(cx + s * 150 - 46, top + 150, 92, 70);
+        ctx.strokeRect(cx + s * 66 - 20, top + 74, 40, 30);
         ctx.fillStyle = '#c98a3a';
         ctx.beginPath();
-        ctx.arc(cx + s * 150 - s * 38, top + 160, 6, 0, Math.PI * 2);
+        ctx.arc(cx + s * 66 - s * 15, top + 80, 3.5, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.strokeStyle = '#e8c27a';
-      ctx.lineWidth = 4;
-      ctx.setLineDash([8, 8]);
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 5]);
       ctx.beginPath();
       for (const s of SIGN) {
-        ctx.moveTo(cx + s * 80, top + 10);
-        ctx.lineTo(cx + s * 74, LH);
-        ctx.moveTo(cx + s * 230, top + 120);
-        ctx.quadraticCurveTo(cx + s * 160, top + 135, cx + s * 100, top + 128);
+        ctx.moveTo(cx + s * 40, top + 8);
+        ctx.lineTo(cx + s * 36, hem);
+        ctx.moveTo(cx + s * 108, top + 58);
+        ctx.quadraticCurveTo(cx + s * 76, top + 66, cx + s * 46, top + 62);
       }
+      ctx.moveTo(cx - 98, hem - 16);
+      ctx.lineTo(cx + 98, hem - 16);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.strokeStyle = PLUM;
-      ctx.lineWidth = 7;
+      ctx.lineWidth = 5;
       ctx.beginPath();
       for (const s of SIGN) {
-        ctx.moveTo(cx + s * 70, top - 8);
-        ctx.lineTo(cx + s * 62, LH + 20);
+        ctx.moveTo(cx + s * 34, top - 6);
+        ctx.lineTo(cx + s * 29, hem + 10);
       }
       ctx.stroke();
       break;
@@ -452,70 +638,66 @@ function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
       ctx.fillStyle = look.accent;
       for (let i = 0; i < 4; i++) {
         ctx.beginPath();
-        ctx.arc(cx, top + 70 + i * 82, 11, 0, Math.PI * 2);
+        ctx.arc(cx, top + 36 + i * 50, 6, 0, Math.PI * 2);
         ctx.fill();
-        strokeOutline(ctx, 4);
+        strokeOutline(ctx, 3);
       }
       ctx.strokeStyle = look.clothShade;
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 4;
       for (const s of SIGN) {
-        ctx.strokeRect(cx + s * 120 - 50, top + 150, 100, 86);
+        ctx.strokeRect(cx + s * 56 - 24, top + 72, 48, 42);
         ctx.fillStyle = look.clothShade;
-        ctx.fillRect(cx + s * 120 - 54, top + 146, 108, 24);
+        ctx.fillRect(cx + s * 56 - 26, top + 70, 52, 12);
       }
-      // Stand collar.
-      filled(ctx, () => ctx.roundRect(cx - 80, top - 22, 160, 40, 12), look.cloth, 7);
+      ctx.fillStyle = '#2a2220';
+      ctx.fillRect(cx - 110, fr.hipY - 18, 220, 14);
       ctx.fillStyle = look.accent;
-      for (const s of SIGN) {
-        ctx.beginPath();
-        ctx.arc(cx + s * 58, top - 2, 8, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      ctx.fillRect(cx - 10, fr.hipY - 20, 20, 18);
       break;
     }
     case 'kebaya': {
-      v(78, 210);
+      v(40, 104);
       ctx.fillStyle = look.skinShade;
       ctx.fill();
       ctx.fillStyle = '#f7efe2';
       for (const s of SIGN) {
-        for (let i = 0; i < 9; i++) {
-          const t = i / 8;
+        for (let i = 0; i < 8; i++) {
+          const t = i / 7;
           ctx.beginPath();
-          ctx.arc(cx + s * lerp(82, 6, t), lerp(top - 4, top + 210, t), 11, 0, Math.PI * 2);
+          ctx.arc(cx + s * lerp(42, 3, t), lerp(top - 3, top + 104, t), 6, 0, Math.PI * 2);
           ctx.fill();
         }
       }
       ctx.fillStyle = '#d9b45a';
       for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        ctx.arc(cx, top + 240 + i * 60, 12, 0, Math.PI * 2);
+        ctx.arc(cx, top + 122 + i * 34, 6, 0, Math.PI * 2);
         ctx.fill();
-        strokeOutline(ctx, 4);
+        strokeOutline(ctx, 3);
       }
       break;
     }
     case 'koko': {
       ctx.fillStyle = look.clothShade;
-      ctx.fillRect(cx - 4, top + 10, 8, 420);
+      ctx.fillRect(cx - 2, top + 6, 5, 200);
       ctx.fillStyle = '#ffffff';
       for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        ctx.arc(cx + 12, top + 70 + i * 70, 8, 0, Math.PI * 2);
+        ctx.arc(cx + 7, top + 36 + i * 36, 4.5, 0, Math.PI * 2);
         ctx.fill();
       }
       break;
     }
     case 'lurik': {
       ctx.strokeStyle = shade(look.cloth, -0.35);
-      ctx.lineWidth = 8;
-      for (let x = cx - 260; x < cx + 260; x += 26) {
+      ctx.lineWidth = 5;
+      for (let x = cx - 120; x < cx + 120; x += 14) {
         ctx.beginPath();
-        ctx.moveTo(x, top - 20);
-        ctx.lineTo(x, LH + 20);
+        ctx.moveTo(x, top - 10);
+        ctx.lineTo(x, hem + 10);
         ctx.stroke();
       }
-      v(60, 120);
+      v(30, 60);
       ctx.fillStyle = look.skinShade;
       ctx.fill();
       break;
@@ -525,61 +707,57 @@ function drawBody(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): vo
       ctx.fillStyle = PLUM;
       for (let i = 0; i < (look.outfit === 'polo' ? 2 : 4); i++) {
         ctx.beginPath();
-        ctx.arc(cx + 10, top + 60 + i * 76, 7, 0, Math.PI * 2);
+        ctx.arc(cx + 6, top + 30 + i * 44, 4, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.strokeStyle = look.clothShade;
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(cx, top + 20);
-      ctx.lineTo(cx, look.outfit === 'polo' ? top + 200 : LH);
+      ctx.moveTo(cx, top + 10);
+      ctx.lineTo(cx, look.outfit === 'polo' ? top + 100 : hem);
       ctx.stroke();
       break;
     }
     case 'kaos': {
       ctx.fillStyle = look.skinShade;
       ctx.beginPath();
-      ctx.ellipse(cx, top - 6, 64, 34, 0, 0, Math.PI);
+      ctx.ellipse(cx, top - 4, 34, 18, 0, 0, Math.PI);
       ctx.fill();
       break;
     }
   }
   ctx.restore();
 
-  traceTorso(ctx, cx, top, breathScale);
-  strokeOutline(ctx);
-  // Collars on top of the outline.
-  if (look.outfit === 'kemeja' || look.outfit === 'polo') {
+  traceTorso(ctx, fr);
+  strokeOutline(ctx, 9);
+  if (look.outfit === 'kemeja' || look.outfit === 'polo' || look.outfit === 'uniform') {
     for (const s of SIGN) {
       filled(ctx, () => {
-        ctx.moveTo(cx + s * 6, top - 10);
-        ctx.lineTo(cx + s * 92, top - 18);
-        ctx.lineTo(cx + s * 44, top + 64);
+        ctx.moveTo(cx + s * 4, top - 8);
+        ctx.lineTo(cx + s * 48, top - 10);
+        ctx.lineTo(cx + s * 22, top + 34);
         ctx.closePath();
-      }, shade(look.cloth, 0.12), 6);
+      }, shade(look.cloth, 0.12), 5);
     }
   } else if (look.outfit === 'koko') {
-    filled(ctx, () => ctx.roundRect(cx - 66, top - 18, 132, 34, 12), look.cloth, 7);
+    filled(ctx, () => ctx.roundRect(cx - 34, top - 10, 68, 18, 7), look.cloth, 5);
   }
   if (look.pack) {
-    // Backpack straps with buckles over both shoulders.
     for (const s of SIGN) {
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(cx + s * 128, top - 2);
-      ctx.quadraticCurveTo(cx + s * 150, top + 200, cx + s * 140, LH + 10);
+      ctx.moveTo(cx + s * 60, top - 2);
+      ctx.quadraticCurveTo(cx + s * 72, top + 110, cx + s * 66, fr.hipY - 6);
       ctx.strokeStyle = PLUM;
-      ctx.lineWidth = 40;
+      ctx.lineWidth = 24;
       ctx.stroke();
       ctx.strokeStyle = shade(look.pack, -0.18);
-      ctx.lineWidth = 28;
+      ctx.lineWidth = 15;
       ctx.stroke();
-      filled(ctx, () => ctx.roundRect(cx + s * 148 - 20, top + 210, 40, 26, 5), '#cfcac0', 5);
+      filled(ctx, () => ctx.roundRect(cx + s * 71 - 11, top + 112, 22, 14, 3), '#cfcac0', 4);
     }
   }
 }
-
-// ── Head ────────────────────────────────────────────────────────────────────
 
 function drawEye(ctx: CanvasRenderingContext2D, ex: number, ey: number, scaleX: number, pose: Pose, skin: string, lashes: boolean, side: -1 | 1): void {
   const rx = 40 * scaleX;
@@ -723,16 +901,16 @@ function traceHijabFace(ctx: CanvasRenderingContext2D, fx: number): void {
   ctx.ellipse(fx * 0.45, 34, HEAD_HALF_W * 0.8, HEAD_HALF_H * 0.98, 0, 0, Math.PI * 2);
 }
 
-/** Hijab back layer: hood that hugs the bean contour + soft drape over the chest. */
-function drawHijabBack(ctx: CanvasRenderingContext2D, color: string): void {
-  const torsoTop = TORSO_TOP - HEAD_CY;
+/** Hijab back layer: hood that hugs the bean contour + soft drape that falls to `drapeY` (head-local units). */
+function drawHijabBack(ctx: CanvasRenderingContext2D, color: string, drapeY: number): void {
+  const w = HEAD_HALF_W;
   ctx.beginPath();
-  ctx.moveTo(-HEAD_HALF_W * 1.06, 0);
-  ctx.bezierCurveTo(-HEAD_HALF_W * 1.12, torsoTop + 40, -HEAD_HALF_W * 0.95, torsoTop + 150, -HEAD_HALF_W * 0.62, torsoTop + 210);
-  ctx.quadraticCurveTo(0, torsoTop + 270, HEAD_HALF_W * 0.62, torsoTop + 210);
-  ctx.bezierCurveTo(HEAD_HALF_W * 0.95, torsoTop + 150, HEAD_HALF_W * 1.12, torsoTop + 40, HEAD_HALF_W * 1.06, 0);
+  ctx.moveTo(-w * 1.06, 0);
+  ctx.bezierCurveTo(-w * 1.16, drapeY * 0.45, -w * 1.08, drapeY * 0.8, -w * 0.74, drapeY * 0.93);
+  ctx.quadraticCurveTo(0, drapeY * 1.06, w * 0.74, drapeY * 0.93);
+  ctx.bezierCurveTo(w * 1.08, drapeY * 0.8, w * 1.16, drapeY * 0.45, w * 1.06, 0);
   ctx.closePath();
-  const g = ctx.createLinearGradient(-HEAD_HALF_W, 0, HEAD_HALF_W, torsoTop + 260);
+  const g = ctx.createLinearGradient(-w, 0, w, drapeY);
   g.addColorStop(0, shade(color, 0.14));
   g.addColorStop(0.55, color);
   g.addColorStop(1, shade(color, -0.24));
@@ -741,15 +919,15 @@ function drawHijabBack(ctx: CanvasRenderingContext2D, color: string): void {
   strokeOutline(ctx);
   // Soft drape folds.
   ctx.strokeStyle = shade(color, -0.3);
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 10;
   ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(-HEAD_HALF_W * 0.7, torsoTop + 60);
-  ctx.quadraticCurveTo(-HEAD_HALF_W * 0.55, torsoTop + 140, -HEAD_HALF_W * 0.62, torsoTop + 196);
-  ctx.moveTo(HEAD_HALF_W * 0.72, torsoTop + 50);
-  ctx.quadraticCurveTo(HEAD_HALF_W * 0.5, torsoTop + 140, HEAD_HALF_W * 0.6, torsoTop + 196);
-  ctx.moveTo(-HEAD_HALF_W * 0.3, torsoTop + 200);
-  ctx.quadraticCurveTo(0, torsoTop + 236, HEAD_HALF_W * 0.3, torsoTop + 200);
+  ctx.moveTo(-w * 0.78, drapeY * 0.5);
+  ctx.quadraticCurveTo(-w * 0.6, drapeY * 0.72, -w * 0.7, drapeY * 0.9);
+  ctx.moveTo(w * 0.8, drapeY * 0.48);
+  ctx.quadraticCurveTo(w * 0.56, drapeY * 0.72, w * 0.66, drapeY * 0.9);
+  ctx.moveTo(-w * 0.3, drapeY * 0.92);
+  ctx.quadraticCurveTo(0, drapeY * 1.0, w * 0.3, drapeY * 0.92);
   ctx.stroke();
 }
 
@@ -923,10 +1101,13 @@ function drawHatwear(ctx: CanvasRenderingContext2D, hw: Headwear, pose: Pose): v
 function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr: Frame): void {
   ctx.save();
   ctx.translate(fr.headX, fr.headY);
+  ctx.scale(HEAD_SCALE, HEAD_SCALE);
   ctx.rotate(pose.tilt);
+  // Keep head ink as heavy as the body ink after scaling down.
+  inkMul = 0.82 / HEAD_SCALE;
   const hijab = look.headwear.kind === 'hijab' ? look.headwear.color : null;
   const fx = pose.turn * 72;
-  if (hijab) drawHijabBack(ctx, hijab);
+  if (hijab) drawHijabBack(ctx, hijab, (fr.top + 100 - fr.headY) / HEAD_SCALE);
   if (look.headwear.kind === 'hair' && look.headwear.style === 'bun') filled(ctx, () => ctx.arc(0, -HEAD_HALF_H - 20, 70, 0, Math.PI * 2), look.hair, 9);
 
   traceBeanHead(ctx);
@@ -946,7 +1127,6 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
   const lx = fx - spacing;
   const rx = fx + spacing;
   const mouthY = eyeY + 118;
-  // Warm blush.
   ctx.fillStyle = hijab ? 'rgba(232, 108, 110, 0.36)' : 'rgba(214, 100, 100, 0.28)';
   ctx.beginPath();
   ctx.ellipse(lx - 12, eyeY + 76, 32 * sL, 15, 0, 0, Math.PI * 2);
@@ -956,7 +1136,7 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
   ctx.moveTo(fx * 1.15 + 4, eyeY + 40);
   ctx.quadraticCurveTo(fx * 1.15 + 22, eyeY + 72, fx * 1.15 - 6, eyeY + 78);
   ctx.strokeStyle = look.skinShade;
-  ctx.lineWidth = 7;
+  ctx.lineWidth = 9;
   ctx.lineCap = 'round';
   ctx.stroke();
   drawEye(ctx, lx, eyeY, sL, pose, look.skin, look.lashes, -1);
@@ -978,6 +1158,7 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
   drawBrow(ctx, look.browColor, lx, eyeY, -1, pose, sL, look.lashes);
   drawBrow(ctx, look.browColor, rx, eyeY, 1, pose, sR, look.lashes);
   drawHatwear(ctx, look.headwear, pose);
+  inkMul = 1;
   ctx.restore();
 }
 
@@ -985,12 +1166,12 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
 
 /** Descending ridership line on the lap board, board-relative 0..1. */
 const GRAPH: readonly Pt[] = [[0.08, 0.18], [0.24, 0.24], [0.38, 0.2], [0.52, 0.42], [0.66, 0.5], [0.8, 0.72], [0.93, 0.86]];
-const BOARD_W = 300;
-const BOARD_H = 210;
+const BOARD_W = 190;
+const BOARD_H = 130;
 const NOTE_LINES = 5;
 
 function boardRect(fr: Frame): { x: number; y: number } {
-  return { x: fr.cx - BOARD_W / 2, y: fr.top + 150 };
+  return { x: fr.cx - BOARD_W / 2, y: fr.hipY - BOARD_H - 12 };
 }
 
 function polylineAt(pts: readonly Pt[], t: number): Pt {
@@ -1005,7 +1186,7 @@ function polylineAt(pts: readonly Pt[], t: number): Pt {
 function notebookWritePoint(cx: number, frame: number, progress: number): Pt {
   const p = clamp01(progress) * NOTE_LINES;
   const line = Math.min(NOTE_LINES - 1, Math.floor(p));
-  return [cx - 130 + (p - line) * 100 + Math.sin(frame * 1.7) * 3, DESK_Y - 52 + line * 9 + Math.sin(frame * 2.3) * 1.5];
+  return [cx - 84 + (p - line) * 66 + Math.sin(frame * 1.7) * 2, DESK_Y - 30 + line * 5 + Math.sin(frame * 2.3)];
 }
 
 interface ArmCtx {
@@ -1017,82 +1198,85 @@ interface ArmCtx {
 }
 
 function shoulderOf(side: 0 | 1, fr: Frame): Pt {
-  return [fr.cx + SIGN[side] * 168, fr.top + 64];
+  return [fr.cx + SIGN[side] * 86, fr.top + 30];
 }
 
-/** Wrist target for a named pose (canvas px). */
+/** Wrist target for a named pose (card px). */
 function wristTarget(pose: ArmPose, side: 0 | 1, c: ArmCtx): Pt {
   const s = SIGN[side];
   const { fr, frame } = c;
-  const { cx, top } = fr;
+  const { cx, top, hipY } = fr;
+  const sy = top + 30;
   const at = (out: number, y: number): Pt => [cx + s * out, y];
+  const sit = fr.pose === 'sit';
   switch (pose) {
     case 'side':
+      return at(112 + Math.sin(frame * 0.05 + side) * 2, hipY - 30);
     case 'lap':
     case 'knee':
-      return at(196 + Math.sin(frame * 0.05 + side) * 3, LH - 70);
+      return sit ? at(50, hipY + 8) : at(112, hipY - 30);
     case 'hip':
-      return at(228, top + 220);
+      return at(100, hipY - 70);
     case 'strap':
-      return at(112, top + 230);
+      return at(54, top + 112);
     case 'pocket':
-      return at(140, LH - 96);
+      return at(66, hipY - 18);
     case 'point':
-      return at(300, top - 10);
+      return at(290, sy - 30);
     case 'pointHigh':
-      return at(270, HEAD_CY - 30);
+      return at(250, sy - 160);
     case 'pointSide':
-      return at(296, top + 70);
+      return at(280, sy + 60);
     case 'spread':
-      return at(300, top + 10);
+      return at(286, sy - 10);
     case 'trace':
-      return at(296 + Math.sin(frame * 0.06) * 8, top + 40 + Math.sin(frame * 0.11) * 6);
+      return at(284 + Math.sin(frame * 0.06) * 6, sy + 12 + Math.sin(frame * 0.11) * 4);
     case 'traceLow':
-      return at(290 + Math.sin(frame * 0.06) * 8, top + 150 + Math.sin(frame * 0.1) * 5);
+      return at(276 + Math.sin(frame * 0.06) * 6, sy + 100 + Math.sin(frame * 0.1) * 3);
     case 'palm':
-      return at(262 + Math.sin(frame * 0.07 + side) * 6, top + 90 + Math.sin(frame * 0.05) * 6);
+      return at(236 + Math.sin(frame * 0.07 + side) * 5, sy + 50 + Math.sin(frame * 0.05) * 4);
     case 'write': {
       const [wx, wy] = notebookWritePoint(cx, frame, c.progress);
-      return [wx - 16, wy - 40];
+      return [wx - 9, wy - 22];
     }
     case 'pressPage':
-      return at(90, DESK_Y - 34);
+      return at(46, DESK_Y - 16);
     case 'chalk': {
       const r = boardRect(fr);
       const [u, v] = polylineAt(GRAPH, c.drawProgress);
-      return [r.x + u * BOARD_W - 12, r.y + v * BOARD_H - 22];
+      return [r.x + u * BOARD_W - 7, r.y + v * BOARD_H - 12];
     }
     case 'holdBoard': {
       const r = boardRect(fr);
-      return [cx + s * (BOARD_W / 2 + 6), r.y + BOARD_H * 0.55];
+      return [cx + s * (BOARD_W / 2 + 4), r.y + BOARD_H * 0.55];
     }
     case 'whistle':
-      return [c.mouth[0] + s * 46, c.mouth[1] + 16];
+      return [c.mouth[0] + s * 26, c.mouth[1] + 8];
     case 'lampLow':
-      return at(226, top + 260);
+      return at(130, hipY - 30);
     case 'hammer': {
       const cyc = ((((frame + side * 7) % 26) + 26) % 26) / 26;
       const raise = cyc < 0.72 ? smoothstep(0, 0.72, cyc) : 1 - smoothstep(0.72, 0.84, cyc);
-      const strike = at(230, LH - 110);
-      const up = at(272, top - 70);
+      const strike = at(150, SOLE - 100);
+      const up = at(230, sy - 80);
       return [lerp(strike[0], up[0], raise), lerp(strike[1], up[1], raise)];
     }
     case 'carryShoulder':
-      return at(196, top - 40);
+      return at(96, top - 30);
     case 'hug':
-      return at(118, LH - 190);
+      return at(58, hipY - 46);
     case 'basketLap':
-      return at(170, LH - 170);
+      return at(84, hipY - 40);
     case 'suitcase':
-      return at(232, top + 250);
+      return at(124, hipY - 40);
     case 'ticket':
-      return at(130, top + 150);
+      return at(64, top + 92);
     case 'newspaper':
-      return at(214, top + 150);
+      return at(118, top + 92);
     case 'reachUp':
-      return at(236, HEAD_CY - 170);
+      return at(150, sy - 230);
     case 'wave':
-      return at(262 + Math.sin(frame * 0.35) * 18, HEAD_CY - 70);
+      return at(190 + Math.sin(frame * 0.35) * 12, sy - 140);
   }
 }
 
@@ -1110,8 +1294,7 @@ function shapeArm(side: 0 | 1, raw: Pt, fr: Frame): ArmShape {
   const dx = wrist[0] - shoulder[0];
   const dy = wrist[1] - shoulder[1];
   const d = Math.max(1, Math.hypot(dx, dy));
-  const bow = Math.max(0, Math.min(150, (360 - d) * 0.55)) + 18;
-  // Perpendicular pointing away from the body centre.
+  const bow = Math.max(0, Math.min(80, (230 - d) * 0.5)) + 8;
   let px = -dy / d;
   let py = dx / d;
   if (px * s < 0 || (Math.abs(px) < 0.2 && py > 0)) {
@@ -1218,24 +1401,35 @@ function drawMitten(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmShap
   ctx.restore();
 }
 
+/** Mittens and hand props are authored at Persis size; draw them scaled around the wrist. */
+function atHandScale(ctx: CanvasRenderingContext2D, wrist: Pt, draw: () => void): void {
+  ctx.save();
+  ctx.translate(wrist[0], wrist[1]);
+  ctx.scale(HAND_SCALE, HAND_SCALE);
+  ctx.translate(-wrist[0], -wrist[1]);
+  inkMul = 0.8 / HAND_SCALE;
+  draw();
+  inkMul = 1;
+  ctx.restore();
+}
+
 function drawArm(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmShape, shape: HandShape, s: number, pocket: boolean): void {
   const q: [Pt, Pt, Pt] = [arm.shoulder, arm.ctrl, arm.wrist];
   const short = look.outfit === 'kaos' || look.outfit === 'polo';
-  hose(ctx, q, 70, short ? look.skin : look.cloth);
-  if (short) hose(ctx, splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.42).first, 84, look.cloth);
+  hose(ctx, q, 36, short ? look.skin : look.cloth);
+  if (short) hose(ctx, splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.42).first, 44, look.cloth);
   else {
-    // Cuff band just before the wrist.
-    const cuff = splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.88).second;
+    const cuff = splitQuad(arm.shoulder, arm.ctrl, arm.wrist, 0.86).second;
     ctx.lineCap = 'butt';
     ctx.beginPath();
     ctx.moveTo(cuff[0][0], cuff[0][1]);
     ctx.quadraticCurveTo(cuff[1][0], cuff[1][1], cuff[2][0], cuff[2][1]);
     ctx.strokeStyle = look.clothShade;
-    ctx.lineWidth = 70;
+    ctx.lineWidth = 36;
     ctx.stroke();
   }
-  drawMitten(ctx, look, arm, pocket ? 'fist' : shape, s);
-  if (pocket) filled(ctx, () => ctx.roundRect(arm.wrist[0] - 52, arm.wrist[1] - 6, 104, 54, 12), look.cloth, 7);
+  atHandScale(ctx, arm.wrist, () => drawMitten(ctx, look, arm, pocket ? 'fist' : shape, s));
+  if (pocket) filled(ctx, () => ctx.roundRect(arm.wrist[0] - 28, arm.wrist[1] - 4, 56, 30, 7), look.cloth, 6);
 }
 
 function drawHandProp(ctx: CanvasRenderingContext2D, prop: HandProp, arm: ArmShape, s: number, frame: number): void {
@@ -1341,74 +1535,76 @@ function weave(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
   ctx.restore();
 }
 
-function drawBodyProp(ctx: CanvasRenderingContext2D, prop: BodyProp, fr: Frame, frame: number, progress: number, drawProgress: number): void {
-  const { cx, top } = fr;
+// ── Body props (painted on the figure, gripped by the mittens) ──────────────
+
+function drawBodyProp(ctx: CanvasRenderingContext2D, prop: BodyProp, fr: Frame, progress: number, drawProgress: number): void {
+  const { cx, top, hipY } = fr;
   switch (prop) {
     case 'none':
     case 'backpack':
       return;
     case 'shoulderBasket': {
-      const bx = cx - 210;
-      const by = top - 70;
-      for (let k = 0; k < 5; k++) filled(ctx, () => ctx.ellipse(bx - 64 + k * 32, by - 54 - (k % 2) * 14, 30, 26, 0, 0, Math.PI * 2), k % 2 ? '#5f9a3a' : '#7cb446', 6);
-      filled(ctx, () => ctx.ellipse(bx + 50, by - 60, 14, 38, 0.5, 0, Math.PI * 2), '#e07a2a', 5);
+      const bx = cx - 118;
+      const by = top - 40;
+      for (let k = 0; k < 5; k++) filled(ctx, () => ctx.ellipse(bx - 36 + k * 18, by - 30 - (k % 2) * 8, 17, 15, 0, 0, Math.PI * 2), k % 2 ? '#5f9a3a' : '#7cb446', 5);
+      filled(ctx, () => ctx.ellipse(bx + 28, by - 34, 8, 22, 0.5, 0, Math.PI * 2), '#e07a2a', 4);
       const basket = (): void => {
-        ctx.moveTo(bx - 110, by - 44);
-        ctx.lineTo(bx + 110, by - 44);
-        ctx.lineTo(bx + 82, by + 80);
-        ctx.quadraticCurveTo(bx, by + 98, bx - 82, by + 80);
+        ctx.moveTo(bx - 62, by - 24);
+        ctx.lineTo(bx + 62, by - 24);
+        ctx.lineTo(bx + 46, by + 46);
+        ctx.quadraticCurveTo(bx, by + 56, bx - 46, by + 46);
         ctx.closePath();
       };
-      filled(ctx, basket, '#b88a4a', 9);
-      weave(ctx, bx - 100, by - 40, 200, 116);
+      filled(ctx, basket, '#b88a4a', 7);
+      weave(ctx, bx - 56, by - 22, 112, 66);
       return;
     }
     case 'lapSack': {
-      const y = LH - 170;
-      for (let k = 0; k < 3; k++) filled(ctx, () => ctx.ellipse(cx - 40 + k * 40, y - 130 - (k % 2) * 12, 28, 32, 0, 0, Math.PI * 2), '#6fa844', 6);
+      const y = hipY - 40;
+      for (let k = 0; k < 3; k++) filled(ctx, () => ctx.ellipse(cx - 24 + k * 24, y - 76 - (k % 2) * 7, 16, 19, 0, 0, Math.PI * 2), '#6fa844', 5);
       filled(ctx, () => {
-        ctx.moveTo(cx - 60, y - 112);
-        ctx.quadraticCurveTo(cx, y - 92, cx + 60, y - 112);
-        ctx.quadraticCurveTo(cx + 150, y - 30, cx + 130, y + 80);
-        ctx.quadraticCurveTo(cx, y + 112, cx - 130, y + 80);
-        ctx.quadraticCurveTo(cx - 150, y - 30, cx - 60, y - 112);
+        ctx.moveTo(cx - 36, y - 66);
+        ctx.quadraticCurveTo(cx, y - 54, cx + 36, y - 66);
+        ctx.quadraticCurveTo(cx + 88, y - 18, cx + 78, y + 46);
+        ctx.quadraticCurveTo(cx, y + 64, cx - 78, y + 46);
+        ctx.quadraticCurveTo(cx - 88, y - 18, cx - 36, y - 66);
         ctx.closePath();
-      }, '#c8a66e', 9);
+      }, '#c8a66e', 7);
       ctx.strokeStyle = '#8a6a3a';
-      ctx.lineWidth = 8;
+      ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.moveTo(cx - 54, y - 94);
-      ctx.lineTo(cx + 54, y - 94);
+      ctx.moveTo(cx - 32, y - 56);
+      ctx.lineTo(cx + 32, y - 56);
       ctx.stroke();
       return;
     }
     case 'lapBakul': {
-      const y = LH - 160;
-      ['#e0742a', '#6fa844', '#d8c24a', '#9a3a2a'].forEach((c, k) => filled(ctx, () => ctx.ellipse(cx - 84 + k * 56, y - 62, 34, 28, 0, 0, Math.PI * 2), c, 6));
+      const y = hipY - 34;
+      ['#e0742a', '#6fa844', '#d8c24a', '#9a3a2a'].forEach((c, k) => filled(ctx, () => ctx.ellipse(cx - 50 + k * 33, y - 36, 20, 16, 0, 0, Math.PI * 2), c, 5));
       filled(ctx, () => {
-        ctx.moveTo(cx - 160, y - 52);
-        ctx.lineTo(cx + 160, y - 52);
-        ctx.lineTo(cx + 124, y + 64);
-        ctx.quadraticCurveTo(cx, y + 82, cx - 124, y + 64);
+        ctx.moveTo(cx - 96, y - 30);
+        ctx.lineTo(cx + 96, y - 30);
+        ctx.lineTo(cx + 74, y + 38);
+        ctx.quadraticCurveTo(cx, y + 48, cx - 74, y + 38);
         ctx.closePath();
-      }, '#c09656', 9);
-      weave(ctx, cx - 150, y - 48, 300, 108);
+      }, '#c09656', 7);
+      weave(ctx, cx - 90, y - 28, 180, 64);
       return;
     }
     case 'lapBoard': {
       const r = boardRect(fr);
-      filled(ctx, () => ctx.roundRect(r.x - 16, r.y - 16, BOARD_W + 32, BOARD_H + 32, 12), '#7a5030', 9);
+      filled(ctx, () => ctx.roundRect(r.x - 10, r.y - 10, BOARD_W + 20, BOARD_H + 20, 8), '#7a5030', 7);
       ctx.fillStyle = '#2c3a32';
       ctx.fillRect(r.x, r.y, BOARD_W, BOARD_H);
       ctx.strokeStyle = 'rgba(240,240,230,0.75)';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(r.x + 18, r.y + 12);
-      ctx.lineTo(r.x + 18, r.y + BOARD_H - 14);
-      ctx.lineTo(r.x + BOARD_W - 12, r.y + BOARD_H - 14);
+      ctx.moveTo(r.x + 12, r.y + 8);
+      ctx.lineTo(r.x + 12, r.y + BOARD_H - 9);
+      ctx.lineTo(r.x + BOARD_W - 8, r.y + BOARD_H - 9);
       ctx.stroke();
       ctx.strokeStyle = '#f4f1ea';
-      ctx.lineWidth = 7;
+      ctx.lineWidth = 5;
       ctx.lineCap = 'round';
       ctx.beginPath();
       for (let k = 0; k <= 40; k++) {
@@ -1420,57 +1616,57 @@ function drawBodyProp(ctx: CanvasRenderingContext2D, prop: BodyProp, fr: Frame, 
       return;
     }
     case 'newspaper': {
-      const x = cx - 200;
-      const y = top + 70;
+      const x = cx - 124;
+      const y = top + 40;
       filled(ctx, () => {
         ctx.moveTo(x, y);
-        ctx.lineTo(x + 400, y - 8);
-        ctx.lineTo(x + 394, y + 290);
-        ctx.lineTo(x + 6, y + 298);
+        ctx.lineTo(x + 248, y - 6);
+        ctx.lineTo(x + 244, y + 180);
+        ctx.lineTo(x + 4, y + 186);
         ctx.closePath();
-      }, '#ece2c8', 9);
+      }, '#ece2c8', 7);
       ctx.fillStyle = '#2a2420';
       ctx.textAlign = 'center';
-      ctx.font = '800 46px Georgia, serif';
-      ctx.fillText('DE KOERIER', cx, y + 54);
-      ctx.font = '700 22px Georgia, serif';
-      ctx.fillText('31 JULI 1930', cx, y + 86);
-      ctx.font = '800 26px Georgia, serif';
-      ctx.fillText('LIJN GAROET–TJIKADJANG', cx, y + 126);
-      ctx.fillText('GEOPEND', cx, y + 158);
+      ctx.font = '800 29px Georgia, serif';
+      ctx.fillText('DE KOERIER', cx, y + 34);
+      ctx.font = '700 14px Georgia, serif';
+      ctx.fillText('31 JULI 1930', cx, y + 54);
+      ctx.font = '800 16px Georgia, serif';
+      ctx.fillText('LIJN GAROET–TJIKADJANG', cx, y + 80);
+      ctx.fillText('GEOPEND', cx, y + 100);
       ctx.fillStyle = 'rgba(42,36,32,0.45)';
-      for (let k = 0; k < 7; k++) {
-        ctx.fillRect(x + 28, y + 184 + k * 14, 160, 7);
-        ctx.fillRect(x + 212, y + 184 + k * 14, 160, 7);
+      for (let k = 0; k < 6; k++) {
+        ctx.fillRect(x + 18, y + 116 + k * 10, 98, 5);
+        ctx.fillRect(x + 132, y + 116 + k * 10, 98, 5);
       }
       return;
     }
     case 'deskNotebook': {
       // Open ledger lying on the desk line (entirely above DESK_Y so the desk never hides it).
       filled(ctx, () => {
-        ctx.moveTo(cx - 150, DESK_Y - 66);
-        ctx.lineTo(cx + 150, DESK_Y - 66);
-        ctx.lineTo(cx + 168, DESK_Y - 4);
-        ctx.lineTo(cx - 168, DESK_Y - 4);
+        ctx.moveTo(cx - 96, DESK_Y - 40);
+        ctx.lineTo(cx + 96, DESK_Y - 40);
+        ctx.lineTo(cx + 108, DESK_Y - 2);
+        ctx.lineTo(cx - 108, DESK_Y - 2);
         ctx.closePath();
-      }, '#f2ead6', 8);
+      }, '#f2ead6', 6);
       ctx.strokeStyle = 'rgba(60,40,30,0.5)';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(cx, DESK_Y - 66);
-      ctx.lineTo(cx, DESK_Y - 4);
+      ctx.moveTo(cx, DESK_Y - 40);
+      ctx.lineTo(cx, DESK_Y - 2);
       ctx.stroke();
       const p = clamp01(progress) * NOTE_LINES;
       ctx.strokeStyle = '#2a2a4a';
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = 2.5;
       for (let line = 0; line < NOTE_LINES; line++) {
         const done = clamp01(p - line);
         if (done <= 0) break;
         ctx.beginPath();
-        const y0 = DESK_Y - 52 + line * 9;
+        const y0 = DESK_Y - 30 + line * 5;
         for (let k = 0; k <= 24 * done; k++) {
-          const x = cx - 130 + (k / 24) * 100;
-          const y = y0 + Math.sin(k * 1.9 + line + frame * 0) * 2;
+          const x = cx - 84 + (k / 24) * 66;
+          const y = y0 + Math.sin(k * 1.9 + line) * 1.3;
           if (k === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -1483,7 +1679,6 @@ function drawBodyProp(ctx: CanvasRenderingContext2D, prop: BodyProp, fr: Frame, 
 
 // ── Critters (same plum ink + toon billboard) ───────────────────────────────
 
-const SOLE = LH - 8;
 
 function paintCritter(ctx: CanvasRenderingContext2D, look: CritterLook, frame: number, walkPhase: number | null, dir: number, blink: number): void {
   const CX = HEAD_CX;
@@ -1492,9 +1687,6 @@ function paintCritter(ctx: CanvasRenderingContext2D, look: CritterLook, frame: n
     ctx.translate(LW, 0);
     ctx.scale(-1, 1);
   }
-  ctx.translate(CX, SOLE);
-  ctx.scale(1.6, 1.6);
-  ctx.translate(-CX, -SOLE);
   const limb = (pts: readonly Pt[], width: number, color: string): void => {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -1600,7 +1792,7 @@ function grain(): HTMLCanvasElement {
 
 let sharedNormalMap: THREE.CanvasTexture | null = null;
 
-/** Ellipsoid head + cylindrical torso normals so the billboard reacts to 3D lights. */
+/** Ellipsoid head + cylindrical torso/leg normals so the card reacts to 3D lights. */
 function normalMap(): THREE.CanvasTexture {
   if (sharedNormalMap) return sharedNormalMap;
   const s = 2;
@@ -1612,24 +1804,28 @@ function normalMap(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas2D context unavailable');
   const img = ctx.createImageData(w, h);
+  const hw = HEAD_HALF_W * HEAD_SCALE;
+  const hh = HEAD_HALF_H * HEAD_SCALE;
   for (let py = 0; py < h; py++) {
     for (let px = 0; px < w; px++) {
       const x = px * s + s / 2;
       const y = py * s + s / 2;
       let nx = 0;
       let ny = 0;
-      const hx = (x - HEAD_CX) / HEAD_HALF_W;
-      const hy = (y - HEAD_CY) / HEAD_HALF_H;
+      const hx = (x - HEAD_CX) / hw;
+      const hy = (y - HEAD_CY) / hh;
       const r2 = hx * hx + hy * hy;
       if (r2 < 1.1) {
         const r = Math.sqrt(r2);
         const k = Math.min(r, 0.95) / Math.max(r, 1e-5);
         nx = hx * k * 0.9;
         ny = -hy * k * 0.9;
-      } else if (y > TORSO_TOP) {
-        const halfW = lerp(185, 250, clamp01((y - TORSO_TOP) / (LH - TORSO_TOP)));
-        nx = Math.max(-0.95, Math.min(0.95, ((x - HEAD_CX) / halfW) * 0.8));
-        ny = (1 - clamp01((y - TORSO_TOP) / 120)) * 0.5;
+      } else if (y > TORSO_TOP && y < HIP_Y + 30) {
+        nx = Math.max(-0.95, Math.min(0.95, ((x - HEAD_CX) / 100) * 0.8));
+        ny = (1 - clamp01((y - TORSO_TOP) / 60)) * 0.5;
+      } else if (y >= HIP_Y + 30 && y < SOLE - 40) {
+        const lx = Math.abs(x - HEAD_CX) - 38;
+        nx = Math.sign(x - HEAD_CX) * Math.max(-0.9, Math.min(0.9, (lx / 30) * 0.8));
       }
       const nz = Math.sqrt(Math.max(0.05, 1 - nx * nx - ny * ny));
       const len = Math.hypot(nx, ny, nz);
@@ -1648,10 +1844,10 @@ function normalMap(): THREE.CanvasTexture {
 
 // ── Character assembly ──────────────────────────────────────────────────────
 
-function solve(d: ToonDrive, seed: number): { pose: Pose; fr: Frame; right: ArmShape; left: ArmShape } {
+function solve(body: BodyPose, d: ToonDrive, seed: number): { pose: Pose; fr: Frame; right: ArmShape; left: ArmShape } {
   const pose = poseFor(d, seed);
-  const fr = frameFor(pose);
-  const mouth: Pt = [fr.headX + pose.turn * 72 * 1.1, fr.headY + pose.lookY * 8 + pose.bow * 16 + 114];
+  const fr = frameFor(pose, body, d.walkPhase);
+  const mouth: Pt = [fr.headX + pose.turn * 72 * 1.1 * HEAD_SCALE, fr.headY + (pose.lookY * 8 + pose.bow * 16 + 128) * HEAD_SCALE];
   const c: ArmCtx = { fr, frame: d.frame, progress: d.progress, drawProgress: d.drawProgress, mouth };
   const arm = (side: 0 | 1, b: ArmBlend): ArmShape => {
     const a = wristTarget(b.from, side, c);
@@ -1661,39 +1857,41 @@ function solve(d: ToonDrive, seed: number): { pose: Pose; fr: Frame; right: ArmS
   return { pose, fr, right: arm(0, d.armRight), left: arm(1, d.armLeft) };
 }
 
-/** Head, chest, shoulder and wrist positions in billboard-local metres at scale 1 (x right, y up from the base). Pure. */
-export function poseLayout(d: ToonDrive, seed = 1): { head: Pt; chest: Pt; shoulders: readonly [Pt, Pt]; hands: readonly [Pt, Pt] } {
-  const { fr, right, left } = solve(d, seed);
-  const w = (p: Pt): Pt => [(p[0] - HEAD_CX) / PX, (LH - p[1]) / PX];
-  return { head: w([fr.headX, fr.headY]), chest: w([fr.cx, fr.top + 120]), shoulders: [w(right.shoulder), w(left.shoulder)], hands: [w(right.wrist), w(left.wrist)] };
+/** Head, chest, shoulder and wrist positions in card-local metres at scale 1 (x right, y up from the soles). Pure. */
+export function poseLayout(body: BodyPose, d: ToonDrive, seed = 1): { head: Pt; chest: Pt; shoulders: readonly [Pt, Pt]; hands: readonly [Pt, Pt] } {
+  const { fr, right, left } = solve(body, d, seed);
+  const w = (p: Pt): Pt => [(p[0] - HEAD_CX) / PX, (SOLE - p[1]) / PX];
+  return { head: w([fr.headX, fr.headY]), chest: w([fr.cx, fr.top + 70]), shoulders: [w(right.shoulder), w(left.shoulder)], hands: [w(right.wrist), w(left.wrist)] };
 }
 
 function paintHuman(ctx: CanvasRenderingContext2D, look: HumanLook, setup: ActorSetup, d: ToonDrive, seed: number): void {
-  const { pose, fr, right, left } = solve(d, seed);
-  // Weight shift pivoting at the base, plus a gentle walking bob.
-  ctx.translate(LW / 2 + pose.shiftX, LH);
-  ctx.rotate(pose.shiftRot);
-  ctx.translate(-LW / 2, -LH + pose.bob);
+  const { pose, fr, right, left } = solve(setup.pose, d, seed);
+  // Weight shift pivoting at the soles (feet stay planted).
+  ctx.translate(LW / 2 + pose.shiftX * 0.4, SOLE);
+  ctx.rotate(pose.shiftRot * 0.6);
+  ctx.translate(-LW / 2, -SOLE);
   drawPackBehind(ctx, look, fr);
+  drawLegs(ctx, look, fr);
   drawBody(ctx, look, fr);
-  if (setup.bodyProp === 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.frame, d.progress, d.drawProgress);
+  if (setup.bodyProp === 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.progress, d.drawProgress);
   drawHead(ctx, look, pose, fr);
-  if (setup.bodyProp !== 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.frame, d.progress, d.drawProgress);
+  if (setup.bodyProp !== 'shoulderBasket') drawBodyProp(ctx, setup.bodyProp, fr, d.progress, d.drawProgress);
   const shapes = [handShapeFor(d.armRight), handShapeFor(d.armLeft)] as const;
   const pockets = [d.armRight, d.armLeft].map((b) => (b.mix < 0.5 ? b.from : b.to) === 'pocket');
   const below = (p: HandProp): boolean => p === 'suitcase' || p === 'signalLamp';
   for (const [arm, prop, side] of [[right, setup.rightProp, 0], [left, setup.leftProp, 1]] as const) {
-    if (below(prop)) drawHandProp(ctx, prop, arm, SIGN[side], d.frame);
+    const propAt = (): void => atHandScale(ctx, arm.wrist, () => drawHandProp(ctx, prop, arm, SIGN[side], d.frame));
+    if (below(prop)) propAt();
     drawArm(ctx, look, arm, prop === 'none' ? shapes[side] : 'fist', SIGN[side], pockets[side] ?? false);
-    if (!below(prop)) drawHandProp(ctx, prop, arm, SIGN[side], d.frame);
+    if (!below(prop)) propAt();
   }
 }
 
-// ── Lit billboard actor ─────────────────────────────────────────────────────
+// ── Lit card actor ──────────────────────────────────────────────────────────
 
 export interface ToonActor {
   id: LookId;
-  /** Origin at the bottom-centre of the billboard (the base of the bust). */
+  /** Origin at the soles (bottom-centre); y = 0 is the floor. */
   mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshToonMaterial>;
   update: (drive: ToonDrive, cameraWorldPosition: THREE.Vector3) => void;
   dispose: () => void;
@@ -1711,7 +1909,8 @@ export function createToonActor(id: LookId, setup: ActorSetup, options: { gradie
   texture.anisotropy = 4;
 
   const geometry = new THREE.PlaneGeometry(ACTOR_PLANE_WIDTH, ACTOR_PLANE_HEIGHT);
-  geometry.translate(0, ACTOR_PLANE_HEIGHT / 2, 0);
+  // Shoe soles exactly on y = 0.
+  geometry.translate(0, ACTOR_PLANE_HEIGHT / 2 - (LH - SOLE) / PX, 0);
   const material = new THREE.MeshToonMaterial({
     map: texture,
     normalMap: look.kind === 'human' ? normalMap() : null,
@@ -1722,6 +1921,8 @@ export function createToonActor(id: LookId, setup: ActorSetup, options: { gradie
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `actor-${id}`;
+  // NOINK contract: character cards carry their own 2D plum ink; never add 3D edge lines to them.
+  mesh.userData.noInk = true;
   mesh.castShadow = true;
   mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: texture, alphaTest: 0.5 });
 
