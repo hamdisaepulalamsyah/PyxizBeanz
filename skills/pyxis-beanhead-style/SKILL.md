@@ -1,28 +1,27 @@
 ---
 name: pyxis-beanhead-style
-description: Standar produksi resmi v2 kartun 3D vertikal gaya Bean-Head untuk Remotion PyxisLab (karakter bean-head full-figure, Z-order bahu-lengan belakang/depan natural, walk cycle bipedal anti-wayang, tipografi diegetik per era tanpa terpotong, environment 3D hero flora & foreground framing, serta sinkronisasi subtitle akustik & ekosistem tools Whisper/FFmpeg/yt-dlp/HyperFrames).
+description: Standar produksi resmi v2.2 kartun 3D vertikal gaya Bean-Head PyxisLab (hibrida 2D Bean-Head Nusantara full-figure + variable-weight ink + ekspresi snappy per-beat + efek komikal 2D, Z-order bahu-lengan belakang/depan natural, walk cycle bipedal anti-wayang, color script naratif & skala 3D megah, macro hook & cross-dissolve, tipografi diegetik per era tanpa terpotong, hero flora komposit, serta subtitle akustik & ekosistem Whisper/FFmpeg/yt-dlp/HyperFrames).
 ---
 
-# pyxis-beanhead-style (v2.0 — PyxisLab Official Production Standard)
+# pyxis-beanhead-style (v2.2 — PyxisLab Cinematic Bean-Head Standard)
 
-Standar acuan **mutlak** untuk semua video short kartun 3D vertikal 9:16 PyxisLab di Remotion.
+Standar acuan **mutlak** untuk semua video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan keunikan karakter **Bean-Head full-figure khas PyxisLab** dengan sinematografi, *color script*, ritme, dan efek hidup ala film pendek animasi 2D-dalam-3D terbaik.
 
 Implementasi referensi di repo ini:
 
 | File | Isi |
 | --- | --- |
 | `src/persis/toon.ts` | Sumber asli kepala Bean-Head (`Haji Zamzam`, `A. Hassan`, dst.). |
-| `src/cikajang/toon.ts` | **Implementasi acuan terkini.** Bean-Head full-figure, Z-order lengan belakang/depan, walk cycle bipedal natural, lengan rubber-hose + mitten, figuran, dan hewan. |
-| `src/cikajang/story.ts` | Shot list, kamera kinematik (smootherstep, creeping hold, kick, roll), framing anti-terpotong, beat sinkron narasi, grade. |
-| `src/cikajang/worlds.ts` | Set 3D, hero flora komposit (kol berlapis, teh, bambu), tekstur prosedural, tipografi diegetik per era, lighting rig, film pass. |
-| `src/cikajang/Cikajang.tsx` | StageManager, contact shadow, frozen sun, caption tajam anti-pudar, hook title slam, font guard aman. |
-| `src/persis/worlds.ts` | `WorldKit` (ramp toon, ink, glow, dust, motes, shaft, label auto-fit, backdrop). |
+| `src/cikajang/toon.ts` | **Implementasi acuan terkini.** Bean-Head full-figure, variable-weight ink, soft crescent shade, ekspresi snappy (termasuk `shock`/`smirk`/`laugh`), Z-order lengan belakang/depan, walk cycle bipedal natural, figuran, dan hewan. |
+| `src/cikajang/story.ts` | Shot list, **Color Script Table** per fase emosi, macro hook, ritme 2–3 dtk di konflik, kamera kinematik (smootherstep, creeping hold, kick, roll, cross-dissolve), framing anti-terpotong. |
+| `src/cikajang/worlds.ts` | Set 3D skala megah, hero prop detail specular/mekanisme, lighting rig naratif, film pass. |
+| `src/cikajang/flora.ts` | Hero flora & prop hidup komposit (kol berlapis daun, daun bawang, ajir bambu, keranjang sayur). |
+| `src/cikajang/signage.ts` | Tipografi diegetik per era + auto-fit `measureText` anti-overflow. |
+| `src/cikajang/fonts.ts` | Peta font per era (`ERA_FONT`) + CSS + Font Guard `1200 ms`. |
+| `src/cikajang/Cikajang.tsx` | StageManager, contact shadow, frozen sun, efek komikal 2D overlay (`speedLines`/`sweatDrop`), caption tajam anti-pudar, hook macro slam, font guard. |
 | `tools/align_subtitles.py` | Penyelaras `words.json` berbasis akustik (`Whisper` / `FFmpeg silencedetect` + RMS speech-island DP + suku kata angka Indonesia). |
-| `src/cikajang/fonts.ts` | `ERA_FONT` (stack font per era + fallback senada), `DIEGETIC_FONT_CSS`, `FONT_GUARD_MS = 1200`. |
-| `src/cikajang/signage.ts` | Painter papan per era: `platePaint`, `carvedStonePaint`, `stencilPaint`, `inkStampPaint`, `muralLetteringPaint`, `platePlane` (emissive) + `fitFont` (auto-fit 86 %). |
-| `src/cikajang/flora.ts` | Prefab hero flora ter-instance: kol komposit, daun bawang, wortel, guludan, tiang telegraf + kabel, burung, daun foreground. |
 
-Kalau ragu, **tiru kode acuan**. Dilarang keras membuat: manekin realistis, kaki tongkat, lengan pipa bersendi patah, T-pose kaku, jalan melompat seperti wayang, bahu menonjol di depan dada, atau teks papan/tahun yang terpotong bingkai kamera.
+Kalau ragu, **tiru kode acuan**. Dilarang keras membuat: manekin realistis, karakter bola putih polos tanpa ciri khas, kaki tongkat, jalan melompat seperti wayang, bahu menonjol di depan dada, T-pose kaku, atau teks papan/tahun yang terpotong.
 
 ---
 
@@ -34,9 +33,7 @@ Kalau ragu, **tiru kode acuan**. Dilarang keras membuat: manekin realistis, kaki
 | Renderer | `@remotion/three` `<ThreeCanvas … flat dpr={1} gl={{ antialias: false, preserveDrawingBuffer: true }}>` |
 | Karakter | Kartu Canvas2D → `THREE.CanvasTexture` di `MeshToonMaterial` (billboard yaw-only) |
 | Determinisme | Semua nilai = fungsi murni dari `frame`. Tidak boleh ada `Math.random()` atau `Date`. |
-| Struktur per proyek | `src/<project>/story.ts`, `toon.ts`, `worlds.ts`, `<Project>.tsx` |
-
-Setiap shot = satu world yang dibangun saat pertama dipakai (`StageManager`). Hanya world aktif yang `visible`.
+| Struktur per proyek | `src/<project>/story.ts`, `toon.ts`, `worlds.ts`, `<Project>.tsx` (+ `flora.ts`, `signage.ts`, `fonts.ts` bila kompleks) |
 
 ---
 
@@ -58,158 +55,105 @@ const HEAD_CY = TORSO_TOP - HEAD_HALF_H * HEAD_SCALE + 8;
 ```
 
 - Geometri plane di-`translate(0, 0.85 - (LH - SOLE)/PX, 0)`, sehingga **sol sepatu tepat di `y = 0`**.
-- Skala tokoh di world: tokoh utama **1.25** (≈ 1.58 m), dewasa **1.1–1.15**, anak **0.85**.
-- **Duduk (`pose: 'sit'`):** pinggul turun ke `SEAT_Y = HIP_Y + 40`, paha memendek ke depan, betis turun, sepatu tetap menapak.
+- Skala tokoh di world: tokoh utama **1.25** (atau lebih kecil relatif terhadap arsitektur megah agar menciptakan **rasio skala unik: karakter imut di dalam ruang 3D besar**), dewasa **1.1–1.15**, anak **0.85**.
+- **Duduk (`pose: 'sit'`):** pinggul turun ke `SEAT_Y = HIP_Y + 40`, sepatu tetap menapak.
 
 ---
 
-## 3. Kepala Bean-Head (`traceBeanHead`), Hijab & Ekspresi
+## 3. Kepala Bean-Head, Variable-Weight Ink & Ekspresi Snappy
 
-- Superellipse lancip lembut di mahkota (`n = 2.3` atas, `2.9` dagu), dilukis di koordinat Persis lalu diskalakan `HEAD_SCALE`, `inkMul = 0.82 / HEAD_SCALE`.
-- Tinta **plum `#241726`** untuk semua garis.
-- Wajah wajib punya: bayangan sisi jauh, pipi blush hangat, hidung kait lembut, mata bulat besar ber-highlight ganda, bulu mata lentik (perempuan/hijab), alis ekspresif.
-- **Hijab Rapi:** lapis belakang (*drape* 3 lipatan) sebelum wajah + pita depan `fill('evenodd')` mengikuti kontur `traceBeanHead(1.07)` + pin/bros kecil di bawah dagu. Mata turun +14 unit agar pas di jendela hijab.
-- **Kehidupan Idle Wajib:** kedip tidak teratur 3–5 detik (sesekali kedip ganda), napas `0.22 Hz`, pergeseran berat badan `0.11 Hz` berporos di sol, ayunan kepala lembut, *saccade* mata tiap ~38 frame.
-
----
-
-## 4. Lengan, Z-Order Bahu & Gerakan Natural (Anti-Tempel Depan & Anti-Wayang)
-
-Ini adalah aturan krusial agar karakter terlihat hidup dan anatomis kartun rapi, bukan wayang kertas yang lengan & bahunya menempel canggung di depan dada:
-
-### 4.1 Z-Order Lapisan Lengan (Wajib `front` vs `back`)
-
-Setiap `ArmPose` wajib diklasifikasikan apakah berada di **belakang** torso (`front: false`) atau **menyilang di depan** dada/perut/meja (`front: true`):
-
-- **Lengan Belakang (`front: false` — dilukis SEBELUM `drawBody()` dan `drawHead()`):**
-  - Meliputi: `side`, `hip`, `pocket`, `point`, `pointHigh`, `pointSide`, `spread`, `trace`, `traceLow`, `palm`, `wave`, `reachUp`, `hammer`, `suitcase`, `lampLow`, `carryShoulder`.
-  - Karena dilukis di belakang torso & hijab, pangkal bahu (`shoulder`) terpotong/tersembunyi rapi oleh garis outline jaket/baju/hijab! Lengan muncul mulus dari sisi luar bahu, **tidak pernah menonjol seperti kapsul yang ditempel di depan dada.**
-- **Lengan Depan (`front: true` — dilukis SETELAH torso):**
-  - Hanya untuk pose yang memang melintasi bagian depan tubuh/benda: `strap`, `write`, `pressPage`, `chalk`, `holdBoard`, `hug`, `basketLap`, `ticket`, `newspaper`, `whistle`.
-  - Pangkal bahu untuk pose `front: true` dibuat menyatu dengan bahu torso (`splitQuad` di titik keluar torso atau *socket shading* tanpa bulatan cap garis plum tebal menabrak kerah/lapel!).
-
-### 4.2 Larangan T-Pose & Sudut Alami
-
-- **DILARANG T-POSE:** Pose `spread`, `palm`, maupun `pointSide` tidak boleh merentangkan kedua tangan lurus horizontal sejajar bahu (`sy ± 20`). Siku harus turun santai oleh gravitasi (`y ≈ sy + 75..120`, bentangan horizontal sedang), dengan lengkungan siku alami mengarah ke bawah/luar.
-- **Asimetri Gestur:** Hindari dua tangan membentuk pose cerminan simetris kaku saat berdiri berbicara (padukan mis. kanan `palm` + kiri `strap` atau `side` yang sedikit bergeser dengan napas).
-- **Transisi Easing Organik:** Blend antar `ArmPose` wajib memakai kurva `smootherstep` / `easeInOut` dengan sedikit *overshoot/settle* lembut (bukan interpolasi linear robotik), disertai sedikit condong/rotasi torso (`tilt` & `shiftX`) mengikuti arah tangan yang sedang beraksi.
-
-### 4.3 Walk Cycle Bipedal Nyata (Anti-Lompat Seperti Wayang)
-
-Dilarang keras menggerakkan kaki hanya naik-turun di tempat (`Math.abs(sin)` vertikal tanpa ayunan langkah!). Saat `walkPhase !== null`:
-
-1. **Ayunan Kaki Elips (Stride X + Lift Y):**
-   - Kaki penumpu (*stance foot*) tetap menapak datar di `SOLE = 975` (`lift = 0`) dan mengayun ke belakang secara simetris agar tidak terasa meluncur (*skating*).
-   - Kaki yang melangkah (*swing foot*) menekuk di lutut (`knee` terangkat dan maju) dengan jejak melengkung halus ke depan (`strideX = Math.sin(phase) * strideAmp * walkDir`, `liftY = Math.max(0, Math.cos(phase)) * 20`), lalu menapak lembut (`footTilt` mengikuti fase tumit–ujung kaki).
-2. **Body Bob Halus (3–4 px, Terendah Saat Kontak):**
-   - Bukan lompatan `-10 px`! Gunakan osilasi ganda lembut `-Math.cos(phase * 2) * 3.5` (3–4 px), di mana titik **terendah** terjadi saat kedua kaki menapak (posisi kontak), sesuai prinsip animasi *cartoon-3d-short*.
-3. **Condong & Counter-Swing Tangan:**
-   - Torso condong ringan `3°–5°` searah `walkDir`.
-   - Tangan yang sedang dalam pose `side` ikut mengayun berlawanan fase dengan kaki (`±28 px` horisontal), membuat jalan terasa bertenaga dan natural.
+- **Bean-Head Nusantara:** Tetap pertahankan identitas kulit hangat, pipi blush lembut, mata ekspresif, dan hijab rapi berbros (atau peci/caping/kepi).
+- **Variable-Weight Ink (Gaya Unik Film Pendek):**
+  - Outline utama kepala & busana TIDAK seragam tipisnya: **lebih tebal (≈ 1.35×) di sisi bawah & sisi bayangan**, dan **lebih tipis (≈ 0.75×) di bagian atas/mahkota terkena cahaya**. Memberi bobot grafis mahal ala ilustrasi tinta tangan!
+- **Soft Crescent Shade & Rim Highlight:**
+  - Bayangan bulan sabit halus di sisi menjauh dari cahaya utama + goresan *rim light* tipis mengikuti warna pencahayaan fase cerita (emas senja, biru bulan, atau terang siang).
+- **Ekspresi Ditukar Snappy Per Beat (Anti-Morph Lembek):**
+  - Gunakan pertukaran ekspresi **tegas & cepat (crossfade ≤ 2 frame atau snap per beat)** yang selalu dibarengi kedipan/reaksi mikro tepat **0–3 frame sebelum kata kunci narasi**.
+  - Kosakata ekspresi lengkap: `neutral`, `warm`, `serious`, `thinking`, `sad`, `wonder`, **`smirk` (melirik sinis), `shock` (kaget/panik), `laugh` (tertawa lepas)**.
+  - **Kehidupan Idle Wajib:** kedip 4 frame (`half/shut/shut/half`) tiap 1.5–4 detik, napas `0.22 Hz`, pergeseran berat `0.11 Hz`, *saccade* mata.
 
 ---
 
-## 5. Sinematografi Vertikal, Framing & Zero-Clipping Text
+## 4. Lengan, Z-Order Bahu, Walk Cycle & Efek Komikal 2D
 
-Lebar horizontal terlihat di kedalaman $d$ adalah $W_{\text{vis}} = 2 \cdot d \cdot \tan(\text{fov}/2) \cdot 0.5625$.
+### 4.1 Z-Order Lapisan Lengan (Wajib `FRONT_POSES`)
+- Urutan lukis: **lengan belakang → torso → kepala → body prop → lengan depan → semua mitten → hand prop**.
+- Lengan santai/samping (`side`, `hip`, `pocket`, `point`, `pointHigh`, `pointSide`, `spread`, `trace`, `traceLow`, `palm`, `wave`, `reachUp`, `hammer`, `suitcase`, `lampLow`, `carryShoulder`) WAJIB di belakang torso & hijab (`front: false`) agar pangkal bahu tertutup alami.
+- Lengan menyilang depan (`strap`, `write`, `pressPage`, `chalk`, `holdBoard`, `hug`, `basketLap`, `ticket`, `newspaper`, `whistle`) di depan torso (`front: true`) dengan pangkal bahu tanpa kapsul outline tebal memotong kerah.
+- **Dilarang T-Pose:** Siku `spread`/`palm`/`pointSide` selalu turun natural oleh gravitasi.
 
-- **Kontrak Zero-Clipping (Wajib Audit Matematis):**
-  - **TIDAK ADA TEKS TERPOTONG** di tepi frame (terutama angka tahun `1930`, `1935`, `1947`, `1982`, `2022`, nama stasiun, atau prasasti). Seluruh lebar papan teks harus masuk di dalam **$82\%$ zona aman horizontal** frame kamera aktif.
-  - **Auto-Fit Font (`measureText`):** `WorldKit.label` maupun custom `canvas` papan wajib mengukur `ctx.measureText(line).width` dan mengecilkan ukuran font otomatis bila lebar teks melebihi `86%` lebar papan — teks tidak boleh keluar dari border papan!
-  - **Anti-Overlap Prop & Teks:** Lencana tambahan (seperti badge `5x`) atau tangan tokoh yang menunjuk tidak boleh menutupi huruf di papan latar. Pisahkan panel atau geser posisi papan & karakter agar keduanya terbaca penuh 100%.
-  - **Keterbacaan Papan di Bayangan:** Papan teks/prasasti kritis gunakan pencahayaan merata atau sedikit emissive/high-ambient agar tidak berubah jadi biru-kelabu kusam saat matahari menyamping.
-  - **Area Aman Bawah:** Jaga area bawah pijakan tokoh utama dan zona subtitle (`y < 380 px` layar) bersih dari rumput liar raksasa yang mencuat menembus lantai beton.
+### 4.2 Walk Cycle Bipedal Nyata (Anti-Lompat Wayang)
+- **Ayunan Elips + Tekuk Lutut:** `strideX = sin(phase) * stride * walkDir`, kaki penumpu menempel datar di `SOLE = 975` agar tidak meluncur (*skating*: `walkPhase = travelled / scale * WALK_PHASE_PER_METRE`), kaki ayun terangkat ≤ 20 px dengan kemiringan sepatu.
+- **Bob Halus:** `3.5 px` (`+cos(2φ) * 3.5`, titik terendah di *double-support* saat kaki menapak), condong torso `4°`, dan ayunan lengan berlawanan fase (`side`).
+- **Organic Gesture Easing:** Smootherstep + *overshoot/settle* lembut + rotasi/condong torso mengikuti arah gestur.
 
----
-
-## 6. Environment 3D Hidup, Detail Hero Flora & Foreground Framing
-
-Bangunan dan alam tidak boleh terasa seperti kubus/bola poligon kosong:
-
-1. **Dilarang Primitif Tunggal Untuk Objek Fokus:**
-   - **Tanaman Kol / Kubis (`ladang`):** Wajib model komposit — guludan tanah gembur bergelombang + jantung kol hijau-pucat berurat + 4–5 daun luar hijau tua yang terbuka mekar bertingkat (bukan 1 bola `Icosahedron`!).
-   - **Flora Lain:** Rumpun bambu beruas + rumpun daun; pohon/semak teh berlayer; keranjang panen terisi sayur/buah yang jelas bentuknya (wortel jingga, tomat merah, kol berlapis).
-   - **Rumput Liar Realistis:** Tumbuhkan rumpun rumput di tanah luar rel dan di *retakan tepi/pangkal dinding*, jangan menembus bidang beton solid tempat tokoh berdiri.
-2. **Foreground Framing (`~1/3` jumlah shot):**
-   - Tambahkan elemen bingkai depan berjarak $> 2\text{ m}$ dari kamera (dedaunan tepi, pilar besi peron di pinggir frame, bingkai jendela, kabut lembut) untuk efek paralaks sinematik tanpa pernah menghalangi wajah tokoh atau papan teks.
-3. **Material Prosedural (`paint.js` standard) & Aset Hidup:**
-   - Gunakan `planksPaint`, `rottenPlanksPaint`, `beamPaint`, `stonePaint`, `cementPaint`, `speckle`.
-   - Elemen dinamis kecil di setiap shot: uap kopi, debu berkilau dalam `kit.shaft`, burung/kupu-kupu, jam dinding berdetik, dedaunan jatuh, kereta bergerak jauh, lentera berayun.
+### 4.3 Efek Komikal 2D (*Cartoon FX Cards*) di Momen Kunci
+Muncul singkat **hanya pada beat cerita utama** (tidak memenuhi layar sepanjang waktu):
+- **Tetes keringat (`sweat`)**: di pelipis karakter saat momen gugup/khawatir/krisis.
+- **Speed lines radial (`speedLines`)**: kilasan garis fokus putih tipis saat momen *panic/punch-in/impact* (mis. palu, peluit, atau bantingan papan `"DITUTUP"`).
+- **Ikon/Stiker Emosi (`?`, `!`, `Zzz`, `spiral`, `spark`)**: melayang singkat di dekat kepala/prop saat bingung, ide muncul, atau menunggu lama.
+- **Mikro-aksi & *Payoff* Props**: animasi fisik serempak (grafik turun, jam berdetak, daun/uap/asap, cahaya retakan/ukiran menyala) saat narasi mencapai klimaks.
 
 ---
 
-## 7. Tipografi Diegetik Sesuai Zaman & Bahan
+## 5. Sinematografi, Hook, Ritme, Transisi & Color Script
 
-**Dilarang menyamaratakan semua tulisan di dinding/papan/koran dengan font standar biasa!**
+### 5.1 Hook (0–3 Detik Pertama = In Medias Res!)
+- **Frame 0 langsung berada di tengah aksi visual**, bukan layar hitam atau intro kosong!
+- **Macro Punch-In (`0–1 dtk`)**: kamera langsung menyorot dekat (*macro punch-in*) ke detail material mengkilap / hero prop ikonik cerita (ukiran tahun, logo lokomotif kuningan, jam) dengan sentuhan tangan karakter, diiringi Hook Title Slam yang tidak menutupi fokus objek utama.
 
-| Era / Konteks | Gaya Tipografi & Bahan | Contoh di Scene |
-| --- | --- | --- |
-| **1930-an Kolonial (`Staatsspoorwegen`)** | Condensed Classic Serif / Art Deco (`Cinzel`, `Playfair Display`, fallback `Georgia serif`) huruf kapital renggang (`letterSpacing`), paku keling kuningan, bingkai enamel dobel atau pahatan batu ber-bevel. | `TJIKADJANG`, `DIENSTREGELING 1935`, `STAATSSPOORWEGEN` |
-| **Prasasti / Batu Pahat** | Serif klasik berukir dengan *inner recess shadow* gelap & *lower rim highlight* terang + bercak lumut tipis di tepi batu. | `1930 – 1982`, `Station Tjikadjang` |
-| **Koran Tahun 1930 (`DE KOERIER`)** | Header Blackletter/Condensed Editorial (`Playfair Display Black`), garis pemisah kolom tipis, kolom berita rapi di atas kertas menguning. | `DE KOERIER · 31 JULI 1930` |
-| **Peti Kayu / Logistik (`BERAS`)** | Gaya stempel *Stencil* terputus (`Courier New` tebal / `IBM Plex Mono`) tinta arang agak pudar mengikuti serat kayu/karung goni. | `BERAS` |
-| **1980-an Orde Baru (`PJKA`, `DITUTUP`)** | Sans industrial tegas & monospace administratif (`Oswald`, `IBM Plex Mono`, fallback condensed sans), plus tekstur stempel/cat merah tegas untuk `DITUTUP`. | `PJKA`, `DITUTUP`, grafik kantor |
-| **Mural Jalanan Kini** | Tipografi street-art mural ekspresif (`Permanent Marker`, gaya kuas tebal miring, outline gelap tebal + *drop shadow* warna cerah + efek cat menetes). | Mural `CIKAJANG` di dinding |
-| **Era KAI Modern (2022+)** | Geometric transit sans bersih (`Plus Jakarta Sans` / `Montserrat`), papan putih berlis biru-oranye ikonik KAI + ikon garis rute presisi. | `GARUT +717 M`, `PETA RUTE` |
+### 5.2 Ritme Editing, Kamera & Cut-Away Mekanisme
+- **Ritme Dinamis:** Babak setup & konflik bergerak cepat & menarik (**2–3 detik per beat/perubahan ukuran shot** — padukan MCU → Wide Reveal → Low Angle Agung → OTS → Insert Prop), lalu melambat memberi ruang napas (**5–6 detik**) pada shot *payoff* penutup!
+- **Kamera Kinematik:** Smootherstep glide + **Creeping Hold** (`0.15–0.25 %/f`, kamera tidak pernah membeku $>4$ frame) + **Impact Kick** 7-frame + **Roll 3°–5°** pada beat dramatis + **Foreground Framing buram** ($>2\text{ m}$ di tepi lensa).
+- **Cut-Away Mekanisme ("Inside Look"):** Saat narasi menjelaskan cara kerja sesuatu (jalur menanjak, mesin uap, jadwal rute), gunakan gerakan kamera menyelam/mendekat *insert/orbit* untuk memperlihatkan cara kerja mekanisnya!
 
-Semua pemuatan Google Fonts di luar `Plus Jakarta Sans` tetap wajib melalui **Font Guard `1200 ms`** agar render lokal never hang jika offline.
+### 5.3 Transisi Elegan
+- **Hard Cut** jatuh tepat di pergantian frasa/jeda kata.
+- **Cross-Dissolve (`0.5–0.8 dtk`)** khusus transisi lembut antar ruang atau siang-ke-malam.
+- **White Flash (`6 frame`)** untuk lompatan era waktu historis (`1930 → 1947 → Kini`).
+- **Dilarang efek murahan** seperti glitch atau zoom-whip berisik.
 
----
-
-## 8. Kamera Kinematik, Pencahayaan & Film Pass
-
-- **Kamera (`motion.js` + `motion-design`):**
-  - Spline `CatmullRom` centripetal + **smootherstep** per segmen (`0` kecepatan & akselerasi di ujung).
-  - **Creeping Hold:** kamera tidak pernah membeku $>4$ frame; saat glide melambat ($<4\text{ mm/f}$), kamera terus push-in `0.15–0.25 %/f` (maks `12 %`).
-  - **Impact Kick:** getaran 7-frame *flip-shake* saat hentakan cerita; **Camera Roll 3°–5°** pada beat emosional; **White Flash 6 frame** (`cut: 'flash'`) pada lompatan era.
-- **Pencahayaan & Shader:**
-  - Ramp toon tiga pita `[64, 150, 255]`, Key hangat + Fill twilight dingin + **Camera-relative frozen sun** (dibekukan per shot terhadap target rata-rata kamera agar bayangan tajam tidak berkedip).
-  - Kontrak **NOINK**: `mesh.userData.noInk = true` pada semua kartu karakter/hewan + **Contact Shadow Blob** wajib di `y = floorY + 0.015`.
-  - Film Pass: DoF (`aperture` & rack `focus`), split-tone, sepia arsip, **vignette lembut 0.22**, grain `source-atop`.
+### 5.4 Color Script (Pencahayaan sebagai Narator)
+Setiap proyek wajib mendefinisikan **Color Script Table** di `story.ts` yang memetakan fase cerita → palet warna, temperatur kunci, warna bayangan (hindari abu-abu mati; gunakan *indigo/lavender/warm amber*), glow, dan atmosfer:
+- *Pembuka / Harapan:* **Golden Dusk** (`#ffa550` key hangat vs `#2c1f4a` bayangan twilight).
+- *Kejayaan / Kolonial / Siang:* **Warm Amber Indoor** (obor/lampu + debu berkilau) atau **Cerah Segar** (langit biru + kabut pegunungan berlapis).
+- *Konflik / Krisis:* **Cool Twilight / Overcast Biru-Ungu** (bayangan dalam, sorotan cahaya sempit, desaturasi terkontrol).
+- *Klimaks / Reveal:* **Kontras Tinggi + Emissive Glow** (retakan/ukiran emas menyala + *god rays* + vignette 0.22).
 
 ---
 
-## 9. Sinkronisasi Subtitle Akustik & Ekosistem Tools (Whisper + FFmpeg + yt-dlp + HyperFrames)
+## 6. Latar 3D Toon Skala Megah, Hero Prop & Environment Hidup
 
-### 9.1 Sinkronisasi Audio–Subtitle Anti-Balap
-- **Akar masalah yang dilarang terulang:** Membagi kata secara linear rata per kalimat panjang padahal ada jeda koma/napas di tengah kalimat membuat kata setelah jeda tertinggal atau membalap suara narator!
-- **Standar Wajib (`tools/align_subtitles.py`):**
-  1. Jika `faster-whisper` / `openai-whisper` tersedia, ambil timestamp kata akustik secara langsung.
-  2. Jika memakai alignment naskah (`sentences.json` + `voice.wav`), **deteksi semua pulau suara (*speech islands*) lewat RMS energi / `FFmpeg silencedetect` (ambang jeda ≥ 150 ms)** di dalam tiap kalimat, lalu pasangkan frasa ke pulau suara memakai Dynamic Programming (prioritas pemecahan di tanda baca `, : ; …` + bobot suku kata fonetik angka Indonesia seperti `1935` = 14 suku kata).
-- **Render Subtitle Tajam:** Gunakan `enter` & `exit` cepat (`2–3 frame`, hindari transisi fade panjang yang tampak transparan pudar di tengah adegan) dan *bottom scrim* gelap bersih (`rgba(10,8,20,0.8)`) agar teks tetap kontras terbaca.
-
-### 9.2 Pipeline Terintegrasi PyxisLab
-1. **`yt-dlp`**: Pengumpulan referensi visual & audio Foley sumber terbuka secara cepat.
-2. **`Whisper` / `tools/align_subtitles.py`**: Penyelarasan presisi `words.json` & `sentences.json` sebelum animasi dimulai; seluruh aksi visual (*key beats*) mendarat **0–3 frame sebelum** kata terkait terucap.
-3. **Audio Mastering (`sfx/` + `FFmpeg`)**: Vokal sebagai acuan (0 dB), music bed di **−6 dB gated RMS (50 % vokal)**, SFX melewati peak limiter (−1 dBTP), output master dinormalisasi ke **−14 LUFS integrated (EBU R128)** sebelum muxing akhir.
-4. **Render Hemat RAM & `HyperFrames`**: Pada mesin RAM 4GB (Dual-Core), render lokal Remotion WAJIB memakai `--concurrency=1 --gl=angle`, atau integrasi frame-capture deterministik (`HyperFrames`) untuk proyek ber-VRAM ketat; **dilarang render visual di cloud.**
+- **Rasio Skala Epik:** Bangunan stasiun, gunung, jembatan, atau lokomotif dibangun besar dan menjulang dibanding tinggi karakter (`~1.5 m`) agar dunia terasa megah sekaligus lucu.
+- **Hero Prop Detail:** Objek pusat cerita dirender jauh lebih kaya detail (specular kuningan/besi, ukiran timbul, roda gigi, jendela berlapis) daripada tembok latar biasa, tetap dibingkai tinta 3D tipis pada siluet objek dunia (`NOINK` hanya untuk kartu 2D karakter).
+- **Dilarang Primitif Tunggal Untuk Hero Flora:**
+  - Kol (`flora.ts`): guludan tanah + jantung kol berurat + 6 kelopak daun luar mekar; ditemani daun bawang, ajir bambu, dan keranjang sayur penuh isian.
+  - Rumput liar hanya di tanah luar lintasan/pangkal tembok — bersih dari beton pijakan tokoh & zona subtitle.
 
 ---
 
-## 9.3 Konvensi Implementasi v2.1 (hasil revisi 7 poin Cikajang)
+## 7. Zero-Clipping Framing & Tipografi Diegetik per Era
 
-- **Subtitle:** jalankan `python3 tools/align_subtitles.py public/<p>/voice.wav public/<p>/sentences.json --out public/<p>/words.json` setiap kali voice/naskah berubah. Tanpa Whisper, backend RMS stdlib (ambang adaptif, jeda ≥ 160 ms) dipakai; cek print per-frasa (`Tahun 1935,` 56.01–57.89 → `ada` 58.14). Token kata = `text.split()` sehingga harus identik dengan kata di kalimat. Jam `06.04` dibobot sebagai "enam lewat empat". Caption: `enter`/`exit` 2 frame, scrim `rgba(10,8,20,0.82)`.
-- **Font guard memblokir panggung:** tekstur papan dilukis saat world dibangun, jadi `<ThreeCanvas>` baru di-mount setelah `useFontGuard()` siap (font termuat atau 1200 ms), dan `continueRender` dipanggil setelah mount. Jangan melukis canvas teks sebelum font siap — font fallback akan "terbakar" ke tekstur.
-- **Z-order lengan:** klasifikasi `front` disimpan di set `FRONT_POSES` di `toon.ts` (pose = string di `story.ts`). Urutan lukis: lengan belakang → torso → kepala → body prop → lengan depan → semua mitten → hand prop. Mitten selalu di atas badan (tangan di saku/pinggang tetap terlihat). Lengan belakang berpangkal 30 px ke dalam bahu; lengan depan tanpa outline 46 px dari soket + socket shade lembut. Saat blend, layer berganti di `mix = 0.5`.
-- **Walk tanpa skating:** fase jalan dihitung dari jarak tempuh: `walkPhase = travelled / scale * WALK_PHASE_PER_METRE` (`= PX / (2·STRIDE_AMP/π)`, ±21.5 rad/m). Jangan pakai faktor tebakan — kaki penumpu akan meluncur. Bob di canvas memakai `+cos(2φ)·3.5` (sumbu y canvas ke bawah → titik terendah saat double-support).
-- **Teks vs kamera bergerak:** audit frustum harus memakai `sampleCamera()` nyata (creep, kick, roll), bukan hanya keyframe. Papan yang keluar frame karena dolly/pan harus: (1) terbaca utuh ≥ 2 detik dulu (tahan kamera dengan keyframe hold), (2) keluar **sekali** di bagian cepat smootherstep, (3) tidak pernah "mengintip" terpotong lagi di gerakan berikutnya. Contoh: papan PJKA shot 8 (`i93 c29 o178`).
-- **Panel tambahan** (badge `5x`, tanggal) digantung sebagai panel terpisah di bawah/atas papan utama, tidak pernah ditempel di atas huruf atau di jalur tangan tokoh.
+- **Audit Frustum Nyata (`sampleCamera()`):** Semua papan teks/tahun kritis wajib berada di **82% zona aman horizontal** kamera dan terbaca utuh $\ge 2\text{ detik}$ tanpa tertutup tangan atau badge lain (`5x` dipisah ke panel sendiri!).
+- **Auto-Fit `measureText` (`signage.ts` & `WorldKit.label`):** Huruf otomatis mengecil agar lebar maks $86\%$ papan.
+- **Tipografi Diegetik per Era (`fonts.ts`):** `Cinzel` (Kolonial 1930-an), `Playfair Display` (Koran/Prasasti), `IBM Plex Mono` (Stensil karung), `Oswald` + stempel merah pudar (1980-an `PJKA`/`DITUTUP`), `Permanent Marker` (Mural street-art), `Plus Jakarta Sans` + strip biru-oranye (KAI 2022). Wajib di-load oleh **Font Guard `1200 ms`** *sebelum* world 3D dibangun!
 
 ---
 
-## 10. Isolasi Aset & Checklist Wajib Sebelum Commit
+## 8. Subtitle Akustik & Ekosistem Tools (`Whisper` + `FFmpeg` + `yt-dlp` + `HyperFrames`)
 
-```
-public/<project>/voice.wav       narasi
-public/<project>/sfx.wav         efek suara (opsional)
-public/<project>/words.json      timing per kata (WAJIB lolos cek speech-island akustik!)
-public/<project>/sentences.json  timing per kalimat
-```
+- **Penyelarasan Wajib (`tools/align_subtitles.py`):** Deteksi *speech islands* (RMS/FFmpeg jeda $\ge 160\text{ ms}$) + DP pemetaan tanda baca & bobot suku kata angka Indonesia (`1935` = 14 suku kata), atau `faster-whisper` bila tersedia.
+- **Tampilan Subtitle Kontras:** 1–2 baris (atau ritme 1–3 kata dinamis jika bergaya ultra-cepat), outline hitam tebal, highlight kuning `#FBBF24`, scrim gelap bawah `rgba(10,8,20,0.82)`, transisi `2 frame`, posisi aman dari UI platform (~65–72% bawah).
+- **Audio & Render Lokal:** Master audio **-14 LUFS integrated** (music `-6 dB` di bawah vokal, peak ≤ `-1 dBTP`). Render lokal di RAM 4GB wajib `--concurrency=1 --gl=angle` (atau `HyperFrames`); **dilarang render di cloud.**
 
-- [ ] `words.json` diselaraskan ke pulau suara aktual `voice.wav` (tidak ada angka/kata pasca-koma yang meleset $>0.2\text{ s}$).
-- [ ] Semua `ArmPose` punya `front: boolean`; lengan belakang digambar sebelum torso & hijab (bahu tidak menonjol di depan dada). Tidak ada T-pose.
-- [ ] Karakter berdiri bersepatu di `SOLE = 975` + contact shadow blob; walk cycle memiliki ayunan kaki elips, tekuk lutut, bob 3–4 px di titik kontak, dan ayunan tangan berlawanan.
-- [ ] Zero clipped text: seluruh papan nama, prasasti, dan tahun masuk 82 % zona aman kamera + auto-fit `measureText` + tidak tertutup tangan/lencana lain.
-- [ ] Hero environment komposit (kol/sayuran berlapis daun, bambu rimbun, rumput tidak menembus beton peron utama, foreground framing tersedia).
-- [ ] Tipografi diegetik berbeda per era/bahan (kolonial serif/stencil/koran/PJKA/mural/modern) dengan font guard ≤ 1.2 detik.
+---
+
+## 9. Checklist Wajib Sebelum Commit
+
+- [ ] `words.json` teruji bebas jeda salah (lolos `align_subtitles.py`).
+- [ ] Color Script per fase cerita terdokumentasi di `story.ts`; Hook detik 0–1 memakai *macro punch-in*.
+- [ ] Karakter: variable-weight ink + soft crescent shade + ekspresi snappy per beat; Z-order `FRONT_POSES` benar; no T-pose; walk cycle bipedal anti-skating.
+- [ ] Efek komikal 2D (`sweat`, `speedLines`, ikon) aktif di momen emosi/hentakan kunci (bukan spam terus-terusan).
+- [ ] Zero clipped text: seluruh papan nama, tahun, dan prasasti (`Station Tjikadjang`, `DIENSTREGELING 1935`, `CIKAJANG`) 100% utuh dan tidak tertutup tangan/prop.
+- [ ] Hero flora komposit + hero prop detail + skala megah + font guard block sebelum world dibangun.
 - [ ] `npx tsc --noEmit` = 0 error. **Jangan render di cloud.**
