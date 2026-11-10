@@ -182,3 +182,9 @@ Setiap proyek wajib mendefinisikan **Color Script Table** di `story.ts` yang mem
 - Audit frustum memakai `sampleCamera()` nyata (creep, kick, roll). Papan yang keluar frame karena dolly: terbaca utuh ≥ 2 dtk dulu, keluar **sekali** di bagian cepat smootherstep, tidak mengintip terpotong lagi.
 - Tangan tokoh yang menelusuri prasasti mendarat di **bingkai/tepi** prasasti, tidak pernah di atas huruf (hitung titik mitten di kartu 768×1024 → meter × scale).
 - Font guard memblokir mount `<ThreeCanvas>` sampai font siap (atau 1200 ms) karena tekstur papan dilukis saat world dibangun.
+
+**Audio (`sfx/`)**
+- Per proyek: `sfx/<p>_synth.py` (generator stdlib, noise dari `random` yang di-seed `Mix`), `sfx/cues/<p>_cue.py` (`DURATION`, `OUT`, `TARGET_LUFS`, `score(mix)`), `sfx/run_<p>_sfx.py`; hasil di `public/<p>/sfx.wav`, diputar sebagai `<Audio>` kedua di bawah `voice.wav`.
+- Waktu cue diambil dari `SHOTS` (cut/kick/flash/`fx`) + `words.json`; foley 0–2 frame sebelum gambar.
+- Narasi tetap dominan: SFX+bed di-master ≈ 5 LU di bawah voice (Cikajang: voice −20.8 → sfx −26 LUFS, ceiling −2 dBFS) dan seluruh mix di-*duck* −8 dB dari envelope RMS `voice.wav` (`duck_under_voice`, lookahead 60 ms). Generator berenergi ≥ 4 kHz (jangkrik, serangga, kilau) diberi gain kecil karena K-weighting menonjolkannya.
+- Bed musik mengikuti Color Script: hangat di pembuka/kejayaan, dingin + drone di krisis, berhenti di hentakan klimaks, hangat lagi di penutup.

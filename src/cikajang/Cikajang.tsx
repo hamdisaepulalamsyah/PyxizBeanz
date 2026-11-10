@@ -631,6 +631,7 @@ export const Cikajang: React.FC<CikajangProps> = ({ words, sentences }) => {
       <ShotChip />
       <Captions pages={pages} words={words} />
       <Audio src={staticFile('cikajang/voice.wav')} />
+      <Audio src={staticFile('cikajang/sfx.wav')} />
     </AbsoluteFill>
   );
 };

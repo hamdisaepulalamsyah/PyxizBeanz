@@ -1792,11 +1792,30 @@ function buildGarut2022(kit: WorldKit): WorldScene {
       c.font = `800 44px ${ERA_FONT.transit}`;
       c.fillText(n, Math.min(w - 130, Math.max(130, x)), y - 46);
     }
-    c.font = `700 30px ${ERA_FONT.transit}`;
-    c.fillStyle = '#d2302a';
-    c.fillText('AKTIF 2022', 340, 380);
-    c.fillStyle = '#6a7078';
-    c.fillText('rencana reaktivasi', 700, 470);
+    // Segment labels, transit-map style: drawn along each segment, offset below the
+    // line by `gap` px, width-capped so they stay clear of the line and both station
+    // dots (clearance ≈ gap − text half-height − line half-width ≈ 24 px).
+    const segLabel = (a: readonly [number, number], b: readonly [number, number], text: string, colour: string): void => {
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const len = Math.hypot(dx, dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      const gap = 52;
+      const dotClear = 26 + 5 + 24; // dot radius + stroke + margin
+      c.save();
+      c.translate((a[0] + b[0]) / 2 - uy * gap, (a[1] + b[1]) / 2 + ux * gap);
+      c.rotate(Math.atan2(dy, dx));
+      c.fillStyle = colour;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      fitFont(c, text, '700', ERA_FONT.transit, 28, len - 2 * dotClear, 0.5);
+      c.fillText(text, 0, 0);
+      c.restore();
+      c.letterSpacing = '0px';
+    };
+    segLabel([160, 260], [520, 330], 'AKTIF 2022', '#d2302a');
+    segLabel([520, 330], [860, 470], 'rencana reaktivasi', '#6a7078');
   });
   const mapG = new THREE.Group();
   mapG.position.set(-1.5, 1.75, -2.5);
