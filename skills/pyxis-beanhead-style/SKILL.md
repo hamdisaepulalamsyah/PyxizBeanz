@@ -5,7 +5,11 @@ description: Standar produksi resmi v2.3 kartun 3D vertikal gaya Bean-Head Pyxis
 
 # pyxis-beanhead-style (v2.3 — PyxisLab Cinematic Bean-Head Master Standard)
 
-Standar acuan **mutlak dan permanen** untuk semua produksi video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan kehangatan pesona karakter **Bean-Head Nusantara khas Persis**, gerak bipedal menapak lantai yang luwes, kemegahan set 3D bertekstur atmosferik ala *Jam Gadang* dan *The Ancient Jar*, trik retensi viral, tata suara *diegetic foley*, efek *Living Painting Texture*, mode edukatif *Inspect / X-Ray*, siluet dinamis di latar belakang, hingga alur kerja efisien berbasis *Modular Kitbash* dan ElevenLabs Web UI.
+Standar acuan **mutlak dan permanen** untuk semua produksi video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan kehangatan pesona karakter **Bean-Head Nusantara khas Persis**, gerak bipedal menapak lantai yang luwes, kemegahan set 3D bertekstur atmosferik ala *Jam Gadang* dan *The Ancient Jar*, trik retensi viral, tata suara *diegetic foley*, hingga alur kerja efisien berbasis *Modular Kitbash* dan ElevenLabs Web UI.
+
+> [!IMPORTANT]
+> **Prinsip Utama: Cerita Adalah Raja, Efek Visual Adalah Pelayan Cerita.**
+> Seluruh fitur visual khusus (seperti *Inspect / X-Ray*, *Diorama Cutaway*, *Comic Action Zoom*, dll.) bersifat **situasional dan adaptif**. Jangan pernah memaksakan efek tertentu jika tidak cocok dengan konteks narasi. Kreator wajib cerdas memilih gaya visual yang paling memperkuat tema cerita.
 
 ---
 
@@ -131,13 +135,14 @@ Setiap episode wajib memiliki **1 objek/bangunan ikonik pusat** yang unik dan me
 - **Dynamic Camera Roll:** Sudut kemiringan roll `2° – 4°` pada momen pendakian, hentakan dramatis, atau klimaks cerita.
 - **Foreground Dirty Framing:** Menaruh ornamen buram (dedaunan, lentera, tiang kayu) di tepi lensa depan untuk efek kedalaman berlapis.
 
-### 6.3 "Inspect / X-Ray Mode" di Momen Fakta Unik
-- **Konsep:** Saat narator memaparkan rahasia sains atau mekanisme tersembunyi (misal: *kenapa dodol tahan 5 bulan*, *cara kerja pendulum Jam Gadang*, atau *proses sangrai biji kopi*), visual panggung mendadak bertransisi elegan menjadi mode **X-Ray / Blueprint / Vintage Scientific Chart**:
-  - Warna dunia sekitar meredup menjadi biru *blueprint* gelap atau cokelat kertas perkamen kuno (*sepia parchment*).
-  - Objek utama terbelah secara 3D (*cutaway diorama*) dan menyala dengan garis outline emas tipis (*emissive gold wireframe*).
-  - Menampilkan animasi gerak molekul (seperti kristal gula mengunci molekul air) atau roda gigi mesin berputar presisi.
-  - Disertai tipografi diegetik bergaya diagram ilmiah kuno yang estetik.
-- **Efek Penonton:** Menghasilkan kepuasan intelektual (*visual dopamine/satisfaction*). Penonton tidak cuma mendengar narasi, tapi langsung "melihat" penjelasan sainsnya secara konkret dan memukau!
+### 6.3 Kotak Senjata Visual: Pilihan Efek Berdasarkan Genre Cerita
+Gunakan efek yang **tepat sesuai topik cerita**, jangan dipukul rata:
+1. **Untuk Konten Sains & Mekanisme (Mode Inspect / X-Ray / Blueprint):**
+   - Layar meredup ke perkamen kuno / blueprint gelap, objek terbelah 3D dengan garis emas mengkilap untuk memperlihatkan rahasia molekul atau roda gigi internal (contoh: *kenapa dodol awet*, *mesin jam kuno*).
+2. **Untuk Konten Sejarah, Petualangan & Legenda (Mode Comic Action Zoom / Dramatic Punch):**
+   - Hindari X-Ray medis! Gunakan *cinematic action punch-in*, garis fokus (*speed lines*) tipis bertinta kuas, ekspresi terkejut dramatis, dan transisi peta kuno / siluet perjalanan heroik (contoh: *sejarah kota Garut*, *legenda kerajaan*).
+3. **Untuk Konten Budaya & Keindahan Alam (Mode Scenic Atmosphere):**
+   - Tonjolkan *god rays*, partikel kabut pegunungan, bayangan dedaunan tertiup angin (*caustics/dappled shadows*), dan pergerakan kamera gliding megah.
 
 ---
 
@@ -193,10 +198,11 @@ C:\Users\Kamila\Documents\video\Hasil\
 
 Saat sesi coding bersama Claude Opus 5.5 dibuka, jalankan checklist ini:
 - [ ] Beri instruksi ke Opus untuk membaca file `skills/pyxis-beanhead-style/SKILL.md` (v2.3).
+- [ ] Tentukan genre cerita: Sains $\rightarrow$ gunakan *Inspect/X-Ray*; Sejarah/Aksi $\rightarrow$ gunakan *Comic Action Zoom*; Alam $\rightarrow$ gunakan *Scenic Atmosphere*.
 - [ ] Pastikan karakter menggunakan base siluet kepala Persis (`src/persis/toon.ts`) dengan Z-order lengan `front: false` di samping.
 - [ ] Pastikan kaki menapak lantai `SOLE = 975` dengan kurva bipedal anti-skating.
 - [ ] Terapkan shader tekstur kanvas/kuas *Living Painting Texture* dan garis tinta plum alami.
 - [ ] Rangkai panggung 3D menggunakan sistem Modular Kitbash + Lighting Mood + siluet pendukung di latar belakang.
-- [ ] Terapkan trik retensi: *Macro Punch-In*, *The 2-Second Rule*, *Inspect / X-Ray Mode*, dan *Seamless Infinite Loop*.
+- [ ] Terapkan trik retensi: *Macro Punch-In*, *The 2-Second Rule*, dan *Seamless Infinite Loop*.
 - [ ] Validasi audio dengan ducking -8 dB di bawah vokal, foley langkah/kain, dan master -14 LUFS.
 - [ ] Pastikan typecheck `tsc --noEmit` lolos 0 error sebelum render.
