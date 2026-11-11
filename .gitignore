@@ -1,2 +1,7 @@
 node_modules
 out
+Hasil
+__pycache__
+*.pyc
+.DS_Store
+Thumbs.db

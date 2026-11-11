@@ -1,44 +1,41 @@
 ---
 name: pyxis-beanhead-style
-description: Standar produksi resmi v2.2 kartun 3D vertikal gaya Bean-Head PyxisLab (hibrida 2D Bean-Head Nusantara full-figure + variable-weight ink + ekspresi snappy per-beat + efek komikal 2D, Z-order bahu-lengan belakang/depan natural, walk cycle bipedal anti-wayang, color script naratif & skala 3D megah, macro hook & cross-dissolve, tipografi diegetik per era tanpa terpotong, hero flora komposit, serta subtitle akustik & ekosistem Whisper/FFmpeg/yt-dlp/HyperFrames).
+description: Standar produksi resmi v2.3 kartun 3D vertikal gaya Bean-Head PyxisLab (hibrida karakter 2D Bean-Head Persis + kaki menapak lantai & Z-order lengan natural, rasio skala 3D megah & atmosfer hidup ala Jam Gadang / The Ancient Jar, framing kamera dinamis, audio seimbang -14 LUFS, workflow TTS ElevenLabs Web UI, engine render hemat resource HyperFrames/Angle, serta manajemen output rapi).
 ---
 
-# pyxis-beanhead-style (v2.2 — PyxisLab Cinematic Bean-Head Standard)
+# pyxis-beanhead-style (v2.3 — PyxisLab Cinematic Bean-Head Standard)
 
-Standar acuan **mutlak** untuk semua video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan keunikan karakter **Bean-Head full-figure khas PyxisLab** dengan sinematografi, *color script*, ritme, dan efek hidup ala film pendek animasi 2D-dalam-3D terbaik.
+Standar acuan **mutlak** untuk semua video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan kehangatan karakter **Bean-Head Nusantara khas Persis**, keanggunan gerak bipedal menapak lantai, kemegahan set 3D bertekstur atmosferik ala *Jam Gadang* dan *The Ancient Jar*, kamera dinamis, audio terkalibrasi, serta alur produksi yang bersih dan efisien.
 
 Implementasi referensi di repo ini:
 
 | File | Isi |
 | --- | --- |
-| `src/persis/toon.ts` | Sumber asli kepala Bean-Head (`Haji Zamzam`, `A. Hassan`, dst.). |
-| `src/cikajang/toon.ts` | **Implementasi acuan terkini.** Bean-Head full-figure, variable-weight ink, soft crescent shade, ekspresi snappy (termasuk `shock`/`smirk`/`laugh`), Z-order lengan belakang/depan, walk cycle bipedal natural, figuran, dan hewan. |
-| `src/cikajang/story.ts` | Shot list, **Color Script Table** per fase emosi, macro hook, ritme 2–3 dtk di konflik, kamera kinematik (smootherstep, creeping hold, kick, roll, cross-dissolve), framing anti-terpotong. |
-| `src/cikajang/worlds.ts` | Set 3D skala megah, hero prop detail specular/mekanisme, lighting rig naratif, film pass. |
-| `src/cikajang/flora.ts` | Hero flora & prop hidup komposit (kol berlapis daun, daun bawang, ajir bambu, keranjang sayur). |
-| `src/cikajang/signage.ts` | Tipografi diegetik per era + auto-fit `measureText` anti-overflow. |
-| `src/cikajang/fonts.ts` | Peta font per era (`ERA_FONT`) + CSS + Font Guard `1200 ms`. |
-| `src/cikajang/Cikajang.tsx` | StageManager, contact shadow, frozen sun, efek komikal 2D overlay (`speedLines`/`sweatDrop`), caption tajam anti-pudar, hook macro slam, font guard. |
-| `tools/align_subtitles.py` | Penyelaras `words.json` berbasis akustik (`Whisper` / `FFmpeg silencedetect` + RMS speech-island DP + suku kata angka Indonesia). |
-| `src/cikajang/fx.ts` | Efek komikal 2D deterministik: `FxLayer` (sprite `sweat`/`question`/`exclaim`/`zzz`/`spark` menempel di kepala tokoh) + `speedLinesAt`/`speedLineSet` (overlay radial layar). |
-
-Kalau ragu, **tiru kode acuan**. Dilarang keras membuat: manekin realistis, karakter bola putih polos tanpa ciri khas, kaki tongkat, jalan melompat seperti wayang, bahu menonjol di depan dada, T-pose kaku, atau teks papan/tahun yang terpotong.
+| `src/persis/toon.ts` | **Sumber asli karakter Bean-Head Nusantara.** Siluet kepala ikonik, mikro-lirikan (*eye saccades*), kedipan ganda acak, siklus napas asimetris (`0.22 Hz`), dan *lip-sync* viseme vokal AIUEO. |
+| `src/cikajang/toon.ts` | **Rig bipedal & Z-order acuan.** Kaki menapak lantai (`SOLE = 975`), Z-order lengan depan/belakang anti-numpuk di bahu, variable-weight ink, dan ekspresi *snappy per beat*. |
+| `src/cikajang/story.ts` & `src/jam-gadang/story.ts` | Shot list adaptif, **Color Script Table**, ritme dinamis 2–3 dtk, kamera kinematik (creeping hold, macro punch-in, impact roll), transisi cross-dissolve & flash. |
+| `src/jam-gadang/worlds.ts` & `src/cikajang/worlds.ts` | Set 3D skala megah, prop arsitektur bertekstur toon line, hero prop mekanisme, lighting rig naratif (rim light senja, torch bounce, kabut atmosferik). |
+| `tools/align_subtitles.py` | Penyelaras `words.json` presisi berbasis akustik audio voice ElevenLabs (`Whisper` / RMS silence detection). |
+| `Hasil/` | Direktori tersentralisasi untuk semua output produksi (`Video Final`, `Stills & Review`, `Draft & Raw`). |
 
 ---
 
-## 1. Format & Arsitektur
+## 1. Format & Arsitektur Render (Spesifikasi Low-Resource Friendly)
 
-| Item | Nilai |
-| --- | --- |
-| Resolusi | 1080 × 1920 (9:16), 30 fps (draft/preview `--scale=0.75`, final `--scale=1`) |
-| Renderer | `@remotion/three` `<ThreeCanvas … flat dpr={1} gl={{ antialias: false, preserveDrawingBuffer: true }}>` |
-| Karakter | Kartu Canvas2D → `THREE.CanvasTexture` di `MeshToonMaterial` (billboard yaw-only) |
-| Determinisme | Semua nilai = fungsi murni dari `frame`. Tidak boleh ada `Math.random()` atau `Date`. |
-| Struktur per proyek | `src/<project>/story.ts`, `toon.ts`, `worlds.ts`, `<Project>.tsx` (+ `flora.ts`, `signage.ts`, `fonts.ts` bila kompleks) |
+| Item | Nilai Standar |
+| :--- | :--- |
+| **Resolusi** | 1080 × 1920 (9:16 Vertikal), 30 fps (Preview `--scale=0.75`, Final `--scale=1`) |
+| **Renderer** | `@remotion/three` `<ThreeCanvas flat dpr={1} gl={{ antialias: false, preserveDrawingBuffer: true }}>` |
+| **Material Karakter** | Kartu Canvas2D → `THREE.CanvasTexture` pada `MeshToonMaterial` + normal map (billboard yaw-only) |
+| **Eksekusi Render** | **Wajib:** `--gl=angle --concurrency=1` untuk menjaga stabilitas RAM 8GB dan mencegah disk paging freeze |
+| **HyperFrames** | Dapat digunakan untuk akselerasi multi-frame Remotion selama konkurensi dibatasi aman (`--concurrency=1` atau maks `2`) |
+| **Determinisme** | Semua visual dan audio = fungsi murni matematis dari `frame` |
 
 ---
 
-## 2. Karakter Full-Figure (Kaki & Sepatu Wajib Menapak Lantai)
+## 2. Karakter Bean-Head: Base Persis + Kaki Bipedal & Z-Order Lengan
+
+Menggabungkan kehangatan pesona karakter Persis dengan fisik tubuh utuh yang proporsional:
 
 ```ts
 const LW = 768, LH = 1024;            // kanvas logis (backing 0.75× → 576 × 768)
@@ -50,141 +47,102 @@ const HEAD_HALF_W = 240;              // ukuran kepala Persis
 const HEAD_HALF_H = (HEAD_HALF_W * 2 * 0.94) / 2;
 const HEAD_SCALE = 118 / HEAD_HALF_W; // lebar kepala di kartu ≈ 236 px
 const HEAD_H_PX = HEAD_HALF_H * 2 * HEAD_SCALE;     // ≈ 222 px (HH)
-const HIP_Y = SOLE - HEAD_H_PX * 1.35;              // kaki ≈ 1.35 × HH
+const HIP_Y = SOLE - HEAD_H_PX * 1.35;              // kaki bean-head gemuk proporsional ≈ 1.35 × HH
 const TORSO_TOP = HIP_Y - HEAD_H_PX * 1.1;          // torso ≈ 1.1 × HH
 const HEAD_CY = TORSO_TOP - HEAD_HALF_H * HEAD_SCALE + 8;
 ```
 
-- Geometri plane di-`translate(0, 0.85 - (LH - SOLE)/PX, 0)`, sehingga **sol sepatu tepat di `y = 0`**.
-- Skala tokoh di world: tokoh utama **1.25** (atau lebih kecil relatif terhadap arsitektur megah agar menciptakan **rasio skala unik: karakter imut di dalam ruang 3D besar**), dewasa **1.1–1.15**, anak **0.85**.
-- **Duduk (`pose: 'sit'`):** pinggul turun ke `SEAT_Y = HIP_Y + 40`, sepatu tetap menapak.
+### 2.1 Anatomi Wajah & Mikro-Animasi Persis
+- **Siluet & Warna:** Kulit hangat Nusantara, pipi merona lembut, outline plum variable-weight (3:1 lebih tebal di sisi bayangan bawah).
+- **Mata Bernyawa:** Lirikan mikro (*eye saccades*) acak tiap 1.2–2 detik, kedipan 4-frame (`half/shut/shut/half`), dan kedipan ganda acak.
+- **Siklus Napas (`0.22 Hz`):** Dada mengembang-kempis asimetris (tarikan napas lebih cepat daripada hembusan napas).
+- **Lip-Sync Vokal AIUEO:** Setiap tokoh yang berbicara wajib membuka mulut secara fonetik mengikuti vokal kata Indonesia dari `words.json`.
+
+### 2.2 Z-Order Lapisan Lengan (Anti-Numpuk di Bahu)
+- **Urutan lukis mutlak:** Lengan belakang → Torso & Busana → Kepala → Lengan depan → Mitten & Telapak → Aksesoris/Prop.
+- **Lengan Santai / Samping / Menunjuk:** Selalu digambar di **belakang torso** (`front: false`) agar pangkal bahu menyatu mulus di balik baju.
+- **Lengan Menyilang Dada / Membawa Barang di Depan:** Digambar di **depan torso** (`front: true`).
+
+### 2.3 Kaki Bipedal Menapak Lantai
+- Sol sepatu selalu menempel di `SOLE = 975` (lantai `y = 0`). Tidak boleh ada karakter yang mengambang di udara.
+- Ayunan langkah menggunakan kurva elips lembut dengan sedikit tekukan lutut dan bobbing torso `3.5 px`.
 
 ---
 
-## 3. Kepala Bean-Head, Variable-Weight Ink & Ekspresi Snappy
+## 3. Fleksibilitas Peran Karakter (Mix Adaptif Opsi A & B)
 
-- **Bean-Head Nusantara:** Tetap pertahankan identitas kulit hangat, pipi blush lembut, mata ekspresif, dan hijab rapi berbros (atau peci/caping/kepi).
-- **Variable-Weight Ink (Gaya Unik Film Pendek):**
-  - Outline utama kepala & busana TIDAK seragam tipisnya: **lebih tebal (≈ 1.35×) di sisi bawah & sisi bayangan**, dan **lebih tipis (≈ 0.75×) di bagian atas/mahkota terkena cahaya**. Memberi bobot grafis mahal ala ilustrasi tinta tangan!
-- **Soft Crescent Shade & Rim Highlight:**
-  - Bayangan bulan sabit halus di sisi menjauh dari cahaya utama + goresan *rim light* tipis mengikuti warna pencahayaan fase cerita (emas senja, biru bulan, atau terang siang).
-- **Ekspresi Ditukar Snappy Per Beat (Anti-Morph Lembek):**
-  - Gunakan pertukaran ekspresi **tegas & cepat (crossfade ≤ 2 frame atau snap per beat)** yang selalu dibarengi kedipan/reaksi mikro tepat **0–3 frame sebelum kata kunci narasi**.
-  - Kosakata ekspresi lengkap: `neutral`, `warm`, `serious`, `thinking`, `sad`, `wonder`, **`smirk` (melirik sinis), `shock` (kaget/panik), `laugh` (tertawa lepas)**.
-  - **Kehidupan Idle Wajib:** kedip 4 frame (`half/shut/shut/half`) tiap 1.5–4 detik, napas `0.22 Hz`, pergeseran berat `0.11 Hz`, *saccade* mata.
+Jangan memaksakan karakter hadir terus-menerus di tengah frame:
+1. **Fase Sinematik & Arsitektur (Opsi A):** Kamera fokus 100% pada kemegahan dunia 3D (arsitektur megah, close-up hero prop berputar, lanskap alam luas). Karakter bisa hadir kecil di balkon kejauhan atau sama sekali tidak ada agar audiens terpukau dengan visual dunia.
+2. **Fase Suasana & Interaksi (Opsi B):** Karakter hadir secara natural di sudut ruangan/alam, berinteraksi fisik nyata dengan objek (memegang pagar, menarik tali pedati, mengamati instrumen).
+3. **Fase Dialog / Tokoh Inti:** Kamera bergerak ke *Medium Close-Up (MCU)* dengan kedalaman ruang (*depth of field*), menonjolkan ekspresi wajah tokoh dan artikulasi bibir yang hidup.
 
 ---
 
-## 4. Lengan, Z-Order Bahu, Walk Cycle & Efek Komikal 2D
+## 4. Dunia 3D Skala Megah & Lingkungan Atmosferik Hidup
 
-### 4.1 Z-Order Lapisan Lengan (Wajib `FRONT_POSES`)
-- Urutan lukis: **lengan belakang → torso → kepala → body prop → lengan depan → semua mitten → hand prop**.
-- Lengan santai/samping (`side`, `hip`, `pocket`, `point`, `pointHigh`, `pointSide`, `spread`, `trace`, `traceLow`, `palm`, `wave`, `reachUp`, `hammer`, `suitcase`, `lampLow`, `carryShoulder`) WAJIB di belakang torso & hijab (`front: false`) agar pangkal bahu tertutup alami.
-- Lengan menyilang depan (`strap`, `write`, `pressPage`, `chalk`, `holdBoard`, `hug`, `basketLap`, `ticket`, `newspaper`, `whistle`) di depan torso (`front: true`) dengan pangkal bahu tanpa kapsul outline tebal memotong kerah.
-- **Dilarang T-Pose:** Siku `spread`/`palm`/`pointSide` selalu turun natural oleh gravitasi.
+Mengadopsi keindahan visual referensi *Jam Gadang* dan *The Ancient Jar*:
 
-### 4.2 Walk Cycle Bipedal Nyata (Anti-Lompat Wayang)
-- **Ayunan Elips + Tekuk Lutut:** `strideX = sin(phase) * stride * walkDir`, kaki penumpu menempel datar di `SOLE = 975` agar tidak meluncur (*skating*: `walkPhase = travelled / scale * WALK_PHASE_PER_METRE`), kaki ayun terangkat ≤ 20 px dengan kemiringan sepatu.
-- **Bob Halus:** `3.5 px` (`+cos(2φ) * 3.5`, titik terendah di *double-support* saat kaki menapak), condong torso `4°`, dan ayunan lengan berlawanan fase (`side`).
-- **Organic Gesture Easing:** Smootherstep + *overshoot/settle* lembut + rotasi/condong torso mengikuti arah gestur.
+### 4.1 Rasio Skala Epik (Epic Scale Contrast)
+- Karakter bean-head yang imut (`tinggi ~1.5 m`) diletakkan di dalam set 3D yang **masif dan berwibawa** (pilar batu berukir, menara tinggi, lembah gunung luas, halaman istana ribuan prajurit). Kontras antara karakter imut dan dunia megah menciptakan daya tarik visual premium.
 
-### 4.3 Efek Komikal 2D (*Cartoon FX Cards*) di Momen Kunci
-Muncul singkat **hanya pada beat cerita utama** (tidak memenuhi layar sepanjang waktu):
-- **Tetes keringat (`sweat`)**: di pelipis karakter saat momen gugup/khawatir/krisis.
-- **Speed lines radial (`speedLines`)**: kilasan garis fokus putih tipis saat momen *panic/punch-in/impact* (mis. palu, peluit, atau bantingan papan `"DITUTUP"`).
-- **Ikon/Stiker Emosi (`?`, `!`, `Zzz`, `spiral`, `spark`)**: melayang singkat di dekat kepala/prop saat bingung, ide muncul, atau menunggu lama.
-- **Mikro-aksi & *Payoff* Props**: animasi fisik serempak (grafik turun, jam berdetak, daun/uap/asap, cahaya retakan/ukiran menyala) saat narasi mencapai klimaks.
+### 4.2 Tekstur & Detail Arsitektur Toon
+- Bangunan tidak boleh sekadar blok warna polosan:
+  - Tembok memiliki aksen susunan batu bata halus dan garis tinta toon luar (*edge outline*).
+  - Pilar memiliki lekukan ornamen dan alas/puncak bertingkat.
+  - Lantai memiliki motif paving, ubin, atau hamparan rumput berlapis.
+
+### 4.3 Partikel Atmosfer & Kehidupan Alam
+- **Partikel Udara:** Berkas cahaya lampu/matahari membawa partikel debu halus yang berpendar (*floating dust specks*), kabut tipis (*fog*), atau uap panas kancah yang meliuk.
+- **Elemen Bergerak:** Pohon dan ranting bergoyang pelan tertiup angin, daun kering melayang sesekali, awan langit berarak perlahan.
+- **Fauna & Figuran:** Siluet burung terbang melintas di langit senja atau kucing yang duduk santai di teras.
 
 ---
 
-## 5. Sinematografi, Hook, Ritme, Transisi & Color Script
+## 5. Sinematografi Kamera Dinamis
 
-### 5.1 Hook (0–3 Detik Pertama = In Medias Res!)
-- **Frame 0 langsung berada di tengah aksi visual**, bukan layar hitam atau intro kosong!
-- **Macro Punch-In (`0–1 dtk`)**: kamera langsung menyorot dekat (*macro punch-in*) ke detail material mengkilap / hero prop ikonik cerita (ukiran tahun, logo lokomotif kuningan, jam) dengan sentuhan tangan karakter, diiringi Hook Title Slam yang tidak menutupi fokus objek utama.
-
-### 5.2 Ritme Editing, Kamera & Cut-Away Mekanisme
-- **Ritme Dinamis:** Babak setup & konflik bergerak cepat & menarik (**2–3 detik per beat/perubahan ukuran shot** — padukan MCU → Wide Reveal → Low Angle Agung → OTS → Insert Prop), lalu melambat memberi ruang napas (**5–6 detik**) pada shot *payoff* penutup!
-- **Kamera Kinematik:** Smootherstep glide + **Creeping Hold** (`0.15–0.25 %/f`, kamera tidak pernah membeku $>4$ frame) + **Impact Kick** 7-frame + **Roll 3°–5°** pada beat dramatis + **Foreground Framing buram** ($>2\text{ m}$ di tepi lensa).
-- **Cut-Away Mekanisme ("Inside Look"):** Saat narasi menjelaskan cara kerja sesuatu (jalur menanjak, mesin uap, jadwal rute), gunakan gerakan kamera menyelam/mendekat *insert/orbit* untuk memperlihatkan cara kerja mekanisnya!
-
-### 5.3 Transisi Elegan
-- **Hard Cut** jatuh tepat di pergantian frasa/jeda kata.
-- **Cross-Dissolve (`0.5–0.8 dtk`)** khusus transisi lembut antar ruang atau siang-ke-malam.
-- **White Flash (`6 frame`)** untuk lompatan era waktu historis (`1930 → 1947 → Kini`).
-- **Dilarang efek murahan** seperti glitch atau zoom-whip berisik.
-
-### 5.4 Color Script (Pencahayaan sebagai Narator)
-Setiap proyek wajib mendefinisikan **Color Script Table** di `story.ts` yang memetakan fase cerita → palet warna, temperatur kunci, warna bayangan (hindari abu-abu mati; gunakan *indigo/lavender/warm amber*), glow, dan atmosfer:
-- *Pembuka / Harapan:* **Golden Dusk** (`#ffa550` key hangat vs `#2c1f4a` bayangan twilight).
-- *Kejayaan / Kolonial / Siang:* **Warm Amber Indoor** (obor/lampu + debu berkilau) atau **Cerah Segar** (langit biru + kabut pegunungan berlapis).
-- *Konflik / Krisis:* **Cool Twilight / Overcast Biru-Ungu** (bayangan dalam, sorotan cahaya sempit, desaturasi terkontrol).
-- *Klimaks / Reveal:* **Kontras Tinggi + Emissive Glow** (retakan/ukiran emas menyala + *god rays* + vignette 0.22).
+- **Macro Punch-In (Detik 0–1):** Membuka shot dengan bidikan sangat dekat ke hero prop (permukaan ukiran emas, jarum jam raksasa, adonan bergolak).
+- **Creeping Hold:** Pada shot narasi statis, kamera tetap bergerak perlahan (`0.15% - 0.25% per frame`) maju atau mengitari objek agar adegan tidak pernah mati kaku.
+- **Camera Roll Dinamis:** Miringkan kamera sebesar `2° – 4°` pada momen pendakian, hentakan dramatis, atau klimaks emosi.
+- **Foreground Framing:** Menempatkan ornamen buram (ranting pohon, pilar, lentera) di tepi lensa depan untuk memberikan ilusi kedalaman 3D (*depth layered composition*).
 
 ---
 
-## 6. Latar 3D Toon Skala Megah, Hero Prop & Environment Hidup
+## 6. Sound Design & Audio Mixing Terkalibrasi
 
-- **Rasio Skala Epik:** Bangunan stasiun, gunung, jembatan, atau lokomotif dibangun besar dan menjulang dibanding tinggi karakter (`~1.5 m`) agar dunia terasa megah sekaligus lucu.
-- **Hero Prop Detail:** Objek pusat cerita dirender jauh lebih kaya detail (specular kuningan/besi, ukiran timbul, roda gigi, jendela berlapis) daripada tembok latar biasa, tetap dibingkai tinta 3D tipis pada siluet objek dunia (`NOINK` hanya untuk kartu 2D karakter).
-- **Dilarang Primitif Tunggal Untuk Hero Flora:**
-  - Kol (`flora.ts`): guludan tanah + jantung kol berurat + 6 kelopak daun luar mekar; ditemani daun bawang, ajir bambu, dan keranjang sayur penuh isian.
-  - Rumput liar hanya di tanah luar lintasan/pangkal tembok — bersih dari beton pijakan tokoh & zona subtitle.
+- **Standar Broadcast YouTube Shorts:** Master audio terpadu di kisaran **-14 LUFS** (integrated loudness) dengan batas aman peak `-1 dBTP`.
+- **Auto-Ducking Wajib:** Saat narasi vokal bersuara, SFX lingkungan dan musik latar otomatis turun **-6 s.d. -8 dB** agar kata-kata narator terdengar sangat jernih dan renyah.
+- **Foley Proporsional:** Suara gemeretak api, decit roda pedati, adukan kuali, desis uap, dan gesekan kain hadir sebagai tekstur pengisi yang pas—tidak memekakkan telinga dan tidak tenggelam.
 
 ---
 
-## 7. Zero-Clipping Framing & Tipografi Diegetik per Era
+## 7. Workflow Suara: ElevenLabs Web UI & Penyelaras Subtitle
 
-- **Audit Frustum Nyata (`sampleCamera()`):** Semua papan teks/tahun kritis wajib berada di **82% zona aman horizontal** kamera dan terbaca utuh $\ge 2\text{ detik}$ tanpa tertutup tangan atau badge lain (`5x` dipisah ke panel sendiri!).
-- **Auto-Fit `measureText` (`signage.ts` & `WorldKit.label`):** Huruf otomatis mengecil agar lebar maks $86\%$ papan.
-- **Tipografi Diegetik per Era (`fonts.ts`):** `Cinzel` (Kolonial 1930-an), `Playfair Display` (Koran/Prasasti), `IBM Plex Mono` (Stensil karung), `Oswald` + stempel merah pudar (1980-an `PJKA`/`DITUTUP`), `Permanent Marker` (Mural street-art), `Plus Jakarta Sans` + strip biru-oranye (KAI 2022). Wajib di-load oleh **Font Guard `1200 ms`** *sebelum* world 3D dibangun!
-
----
-
-## 8. Subtitle Akustik & Ekosistem Tools (`Whisper` + `FFmpeg` + `yt-dlp` + `HyperFrames`)
-
-- **Penyelarasan Wajib (`tools/align_subtitles.py`):** Deteksi *speech islands* (RMS/FFmpeg jeda $\ge 160\text{ ms}$) + DP pemetaan tanda baca & bobot suku kata angka Indonesia (`1935` = 14 suku kata), atau `faster-whisper` bila tersedia.
-- **Tampilan Subtitle Kontras:** 1–2 baris (atau ritme 1–3 kata dinamis jika bergaya ultra-cepat), outline hitam tebal, highlight kuning `#FBBF24`, scrim gelap bawah `rgba(10,8,20,0.82)`, transisi `2 frame`, posisi aman dari UI platform (~65–72% bawah).
-- **Audio & Render Lokal:** Master audio **-14 LUFS integrated** (music `-6 dB` di bawah vokal, peak ≤ `-1 dBTP`). Render lokal di RAM 4GB wajib `--concurrency=1 --gl=angle` (atau `HyperFrames`); **dilarang render di cloud.**
+1. **Produksi Voiceover:**
+   - Gunakan **ElevenLabs Web UI** resmi dengan model `eleven_multilingual_v2`.
+   - Pilih persona suara berkarakter (misal: *Bagas* untuk narasi berwibawa Indonesia, atau suara hangat ekspresif lainnya).
+   - Ekspor audio WAV/MP3 dan simpan di `public/<proyek>/voice.wav`.
+2. **Penyelarasan Presisi:**
+   - Jalankan `python tools/align_subtitles.py public/<proyek>/voice.wav public/<proyek>/sentences.json --out public/<proyek>/words.json`.
+   - Subtitle otomatis sinkron per kata dengan highlight kuning kontras `#FBBF24` dan outline hitam tebal.
 
 ---
 
-## 9. Checklist Wajib Sebelum Commit
+## 8. Standar Manajemen Direktori & Output (`Hasil/`)
 
-- [ ] `words.json` teruji bebas jeda salah (lolos `align_subtitles.py`).
-- [ ] Color Script per fase cerita terdokumentasi di `story.ts`; Hook detik 0–1 memakai *macro punch-in*.
-- [ ] Karakter: variable-weight ink + soft crescent shade + ekspresi snappy per beat; Z-order `FRONT_POSES` benar; no T-pose; walk cycle bipedal anti-skating.
-- [ ] Efek komikal 2D (`sweat`, `speedLines`, ikon) aktif di momen emosi/hentakan kunci (bukan spam terus-terusan).
-- [ ] Zero clipped text: seluruh papan nama, tahun, dan prasasti (`Station Tjikadjang`, `DIENSTREGELING 1935`, `CIKAJANG`) 100% utuh dan tidak tertutup tangan/prop.
-- [ ] Hero flora komposit + hero prop detail + skala megah + font guard block sebelum world dibangun.
-- [ ] `npx tsc --noEmit` = 0 error. **Jangan render di cloud.**
+Semua file output produksi dilarang menumpuk di sembarang tempat. Wajib diarahkan ke struktur rapi berikut:
 
----
-
-## 10. Konvensi Implementasi (acuan kode Cikajang)
-
-**Data & timing**
-- `python3 tools/align_subtitles.py public/<p>/voice.wav public/<p>/sentences.json --out public/<p>/words.json` setiap kali voice/naskah berubah; token kata = `text.split()` kalimat. Jam `06.04` dibobot "enam lewat empat".
-- Beat visual (ekspresi, FX, kick) dihitung dari `words.json`: `frame = round(detik·30)`, `progress = (frame − shot.from)/(shot.to − shot.from − 1)`, lalu taruh **0–3 frame sebelum** kata.
-
-**Karakter (`toon.ts`)**
-- `ToonDrive.light = { rim, rimStrength, side }` diisi `Cikajang.tsx` dari `COLOR_SCRIPT[shot.phase]`; `side` = sisi layar arah key light (dot arah directional light shadow-caster dengan vektor kanan kamera). Crescent shade, rim, dan tinta tebal (`inkVar`: stroke 0.75× + salinan bergeser ke sisi bayangan/bawah → ≈1.35×) semuanya mengikuti `side`.
-- Ekspresi memakai `snapKeys()` (bukan `blendKeys`): mix 0→1 dalam `EXPRESSION_SNAP_FRAMES = 2` tepat di key; `expressionAge` memicu kedip paksa 4 frame + jolt kepala ±2 px.
-- Z-order `FRONT_POSES`: lengan belakang → torso → kepala → body prop → lengan depan → semua mitten → hand prop. Walk: `walkPhase = travelled/scale · WALK_PHASE_PER_METRE` (anti-skating).
-- Anchor FX kepala: `HEAD_CENTER_M`, `HEAD_HALF_H_M`, `HEAD_HALF_W_M` (meter pada skala 1 — kalikan `member.scale`).
-
-**Shot data (`story.ts`)**
-- `Shot.phase: ColorPhase` wajib; `COLOR_SCRIPT` = key / shadow / rim / glow / haze per fase. `lightRig({ phase })` di `worlds.ts` mencampur hemi, key, dan fill rim dari tabel yang sama.
-- `Shot.fx: FxCue[]` = `{ kind, at, frames, cast?, pos?, size? }` — `speedLines` efek layar; selain itu menempel ke kepala `cast[i]` atau `pos` dunia. 10–30 frame, hanya di beat kunci.
-- `cut: 'xfade'` = cross-dissolve `XFADE_FRAMES = 15`: `crossfadeAt(frame)` → `FilmPipeline.renderPrev()` merender frame terakhir shot sebelumnya (sudah di-grade) ke buffer, lalu `render(..., { xfade })` mencampurnya. Panggung di-pose via `poseAt(frame)` yang murni, jadi aman dipanggil dua kali per frame.
-
-**Teks & kamera**
-- Audit frustum memakai `sampleCamera()` nyata (creep, kick, roll). Papan yang keluar frame karena dolly: terbaca utuh ≥ 2 dtk dulu, keluar **sekali** di bagian cepat smootherstep, tidak mengintip terpotong lagi.
-- Tangan tokoh yang menelusuri prasasti mendarat di **bingkai/tepi** prasasti, tidak pernah di atas huruf (hitung titik mitten di kartu 768×1024 → meter × scale).
-- Font guard memblokir mount `<ThreeCanvas>` sampai font siap (atau 1200 ms) karena tekstur papan dilukis saat world dibangun.
-
-**Audio (`sfx/`)**
-- Per proyek: `sfx/<p>_synth.py` (generator stdlib, noise dari `random` yang di-seed `Mix`), `sfx/cues/<p>_cue.py` (`DURATION`, `OUT`, `TARGET_LUFS`, `score(mix)`), `sfx/run_<p>_sfx.py`; hasil di `public/<p>/sfx.wav`, diputar sebagai `<Audio>` kedua di bawah `voice.wav`.
-- Waktu cue diambil dari `SHOTS` (cut/kick/flash/`fx`) + `words.json`; foley 0–2 frame sebelum gambar.
-- Narasi tetap dominan: SFX+bed di-master ≈ 5 LU di bawah voice (Cikajang: voice −20.8 → sfx −26 LUFS, ceiling −2 dBFS) dan seluruh mix di-*duck* −8 dB dari envelope RMS `voice.wav` (`duck_under_voice`, lookahead 60 ms). Generator berenergi ≥ 4 kHz (jangkrik, serangga, kilau) diberi gain kecil karena K-weighting menonjolkannya.
-- Bed musik mengikuti Color Script: hangat di pembuka/kejayaan, dingin + drone di krisis, berhenti di hentakan klimaks, hangat lagi di penutup.
+```
+C:\Users\Kamila\Documents\video\Hasil\
+├── Video Final\          <-- Khusus video MP4 final ter-render sempurna siap rilis
+│   ├── persis_remake_final.mp4
+│   ├── jam_gadang_v2_final.mp4
+│   ├── cikajang_v22_final.mp4
+│   └── dodol_garut_v1_final.mp4
+├── Stills & Review\      <-- Kumpulan tangkapan layar (contact sheet & audit beat)
+│   ├── dg_v4_still_*.jpg
+│   └── cikajang_still_*.jpg
+└── Draft & Raw\          <-- Video mentah tanpa audio, uji coba, preview sementara
+    ├── jam_gadang_raw.mp4
+    └── test_frames.mp4
+```
+Semua script render baru dan pipeline wajib merujuk ke folder `Hasil\` ini.
