@@ -17,6 +17,13 @@ import {
   PERSIS_HEIGHT,
   PERSIS_WIDTH,
 } from './persis/story';
+import { HotellingLaw, hotellingCalculateMetadata } from './hotelling-law/HotellingLaw';
+import {
+  HOTELLING_DURATION_IN_FRAMES,
+  HOTELLING_FPS,
+  HOTELLING_HEIGHT,
+  HOTELLING_WIDTH,
+} from './hotelling-law/story';
 
 export const RemotionRoot: React.FC = () => (
   <>
@@ -59,6 +66,15 @@ export const RemotionRoot: React.FC = () => (
       height={DG_HEIGHT}
       defaultProps={DODOL_GARUT_DEFAULT_PROPS}
       calculateMetadata={calculateDodolGarutMetadata}
+    />
+    <Composition
+      id="HotellingLaw"
+      component={HotellingLaw}
+      durationInFrames={HOTELLING_DURATION_IN_FRAMES}
+      fps={HOTELLING_FPS}
+      width={HOTELLING_WIDTH}
+      height={HOTELLING_HEIGHT}
+      calculateMetadata={hotellingCalculateMetadata}
     />
   </>
 );
