@@ -5,7 +5,7 @@ description: Standar produksi resmi v2.3 kartun 3D vertikal gaya Bean-Head Pyxis
 
 # pyxis-beanhead-style (v2.3 — PyxisLab Cinematic Bean-Head Master Standard)
 
-Standar acuan **mutlak dan permanen** untuk semua produksi video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan kehangatan pesona karakter **Bean-Head Nusantara khas Persis**, gerak bipedal menapak lantai yang luwes, kemegahan set 3D bertekstur atmosferik ala *Jam Gadang* dan *The Ancient Jar*, trik retensi viral, tata suara *diegetic foley*, hingga alur kerja efisien berbasis *Modular Kitbash* dan ElevenLabs Web UI.
+Standar acuan **mutlak dan permanen** untuk semua produksi video short kartun 3D vertikal 9:16 PyxisLab di Remotion. Menggabungkan kehangatan pesona karakter **Bean-Head Nusantara khas Persis**, gerak bipedal menapak lantai yang luwes, kemegahan set 3D bertekstur atmosferik ala *Jam Gadang* dan *The Ancient Jar*, trik retensi viral, tata suara *diegetic foley*, efek *Living Painting Texture*, mode edukatif *Inspect / X-Ray*, siluet dinamis di latar belakang, hingga alur kerja efisien berbasis *Modular Kitbash* dan ElevenLabs Web UI.
 
 ---
 
@@ -69,21 +69,30 @@ Karakter tidak boleh dipaksakan selalu berdiri di tengah frame setiap saat:
 
 ---
 
-## 4. Dunia 3D Skala Megah & Lingkungan Atmosferik Hidup
+## 4. Dunia 3D Skala Megah & Sentuhan "Living Painting"
 
 Mengadopsi keindahan visual referensi *Jam Gadang* dan *The Ancient Jar*:
 
 ### 4.1 Rasio Skala Epik (Epic Scale Contrast)
 - Karakter bean-head imut (`~1.5 m`) diletakkan di dalam set 3D yang **menjulang megah dan berwibawa** (pilar batu berukir, menara jam Minang, halaman istana luas, lembah gunung Priangan). Kontras ini memberikan sentuhan visual premium.
 
-### 4.2 Tekstur Toon Artistik & "Living Painting"
-- Tembok memiliki susunan bata halus dan garis tinta toon luar (*edge outline*).
-- Lapisan *subtle grain/brushstroke* hangat yang memberi kesan buku cerita animasi bergengsi (*story-book cinematic*), bukan 3D komputer mentah.
+### 4.2 "Living Painting" Texture (Tekstur Kanvas & Cat Air Bergerak Halus)
+- **Konsep:** Visual tidak boleh terlihat seperti grafik komputer 3D polos yang kaku dan mengkilap layaknya game lawas. Seluruh dunia harus terasa seperti **lukisan hidup (*story-book animation*)** yang hangat dan berjiwa ala film animasi Ghibli / festival Eropa.
+- **Trik Teknis:**
+  - Tambahkan lapisan *subtle paper/canvas grain* procedural dan sapuan kuas halus (*brushstroke micro-displacement*) pada shader Three.js atau pasca-proses overlay.
+  - Tembok dan bangunan memiliki garis tinta toon luar (*edge outline*) bertinta plum gelap alami, bukan garis hitam tebal komputer murahan.
+  - Tepian bayangan di-render dengan gradasi warna hangat (indigo / lavender / warm amber), bukan abu-abu mati.
 
 ### 4.3 Partikel Atmosfer & Kehidupan Latar Belakang
 - **Partikel Udara:** Berkas cahaya matahari/lampu membawa bintik debu emas melayang (*floating dust specks*), kabut tipis (*fog*), atau uap mengepul meliuk.
 - **Elemen Bergerak:** Ranting dan pohon bergoyang lembut tertiup angin, daun kering melayang sesekali, awan langit berarak perlahan.
-- **Siluet Figuran & Fauna:** Burung melintas di langit senja atau kucing yang duduk santai di teras latar belakang.
+
+### 4.4 Dynamic "Character Silhouette Acting" di Latar Belakang
+- **Konsep:** Penonton sangat menyukai "kehidupan tersembunyi" di latar belakang panggung yang membuat dunia terasa nyata dan berpenghuni.
+- **Trik Eksekusi:** Di belakang karakter utama yang sedang beraksi, hadirkan siluet figur pendukung yang bergerak alami secara diegetik:
+  - *Di jendela rumah / teras:* Siluet kucing lokal yang menguap malas lalu bergulung tidur.
+  - *Di lorong / jalan kejauhan:* Siluet warga desa yang sedang memikul bakul atau mendorong sepeda melintas santai.
+  - *Di dahan pohon / atap:* Burung yang hinggap, menoleh ke kiri-kanan, lalu terbang saat ada suara hentakan narasi.
 
 ---
 
@@ -122,8 +131,13 @@ Setiap episode wajib memiliki **1 objek/bangunan ikonik pusat** yang unik dan me
 - **Dynamic Camera Roll:** Sudut kemiringan roll `2° – 4°` pada momen pendakian, hentakan dramatis, atau klimaks cerita.
 - **Foreground Dirty Framing:** Menaruh ornamen buram (dedaunan, lentera, tiang kayu) di tepi lensa depan untuk efek kedalaman berlapis.
 
-### 6.3 "Inspect / X-Ray Mode" di Momen Fakta Kunci
-Saat narasi memaparkan fakta sains/mekanisme yang tersembunyi, panggung meredup menjadi mode *scientific diorama* (misal: objek terbelah 3D memperlihatkan roda gigi atau diagram molekul gula mengunci air dengan garis emas tipis).
+### 6.3 "Inspect / X-Ray Mode" di Momen Fakta Unik
+- **Konsep:** Saat narator memaparkan rahasia sains atau mekanisme tersembunyi (misal: *kenapa dodol tahan 5 bulan*, *cara kerja pendulum Jam Gadang*, atau *proses sangrai biji kopi*), visual panggung mendadak bertransisi elegan menjadi mode **X-Ray / Blueprint / Vintage Scientific Chart**:
+  - Warna dunia sekitar meredup menjadi biru *blueprint* gelap atau cokelat kertas perkamen kuno (*sepia parchment*).
+  - Objek utama terbelah secara 3D (*cutaway diorama*) dan menyala dengan garis outline emas tipis (*emissive gold wireframe*).
+  - Menampilkan animasi gerak molekul (seperti kristal gula mengunci molekul air) atau roda gigi mesin berputar presisi.
+  - Disertai tipografi diegetik bergaya diagram ilmiah kuno yang estetik.
+- **Efek Penonton:** Menghasilkan kepuasan intelektual (*visual dopamine/satisfaction*). Penonton tidak cuma mendengar narasi, tapi langsung "melihat" penjelasan sainsnya secara konkret dan memukau!
 
 ---
 
@@ -181,7 +195,8 @@ Saat sesi coding bersama Claude Opus 5.5 dibuka, jalankan checklist ini:
 - [ ] Beri instruksi ke Opus untuk membaca file `skills/pyxis-beanhead-style/SKILL.md` (v2.3).
 - [ ] Pastikan karakter menggunakan base siluet kepala Persis (`src/persis/toon.ts`) dengan Z-order lengan `front: false` di samping.
 - [ ] Pastikan kaki menapak lantai `SOLE = 975` dengan kurva bipedal anti-skating.
-- [ ] Rangkai panggung 3D menggunakan sistem Modular Kitbash + Lighting Mood (bukan copy-paste ruang statis).
-- [ ] Terapkan trik retensi: *Macro Punch-In*, *The 2-Second Rule*, dan *Seamless Infinite Loop*.
-- [ ] Validasi audio dengan ducking -8 dB di bawah vokal dan master -14 LUFS.
+- [ ] Terapkan shader tekstur kanvas/kuas *Living Painting Texture* dan garis tinta plum alami.
+- [ ] Rangkai panggung 3D menggunakan sistem Modular Kitbash + Lighting Mood + siluet pendukung di latar belakang.
+- [ ] Terapkan trik retensi: *Macro Punch-In*, *The 2-Second Rule*, *Inspect / X-Ray Mode*, dan *Seamless Infinite Loop*.
+- [ ] Validasi audio dengan ducking -8 dB di bawah vokal, foley langkah/kain, dan master -14 LUFS.
 - [ ] Pastikan typecheck `tsc --noEmit` lolos 0 error sebelum render.
