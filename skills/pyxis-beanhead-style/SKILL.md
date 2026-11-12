@@ -48,6 +48,46 @@ const HEAD_CY = TORSO_TOP - HEAD_HALF_H * HEAD_SCALE + 8;
 ### 2.1 Wajah & Ekspresi Bernyawa (Formula Persis)
 - **Siluet Wajah:** Kulit bernuansa hangat Nusantara, pipi blush merona halus, outline plum variable-weight (stroke 3:1 lebih tebal di sisi bayangan bawah).
 - **Mikro-Animasi Wajib:**
+  - Nafas organik 0.22 Hz pada torso dan bahu.
+  - Kedipan mata seeded (setiap 2.5–4 detik) + lirikan mata halus mengikuti aksi/kamera.
+  - Lip-sync AIUEO tersinkronisasi akustik ke `words.json`.
+- **Karakter Figuran & Kerumunan Wajib Seragam (Unified Style):** DILARANG menggunakan kapsul/silinder 3D polos sebagai orang/kerumunan. Semua manusia (turis, warga kota, pembeli) WAJIB menggunakan format Bean-Head Persis berbusana santai/tematik, berekspresi hidup, dan proporsional.
+- **Anatomi Aksi Alami (Pose & Arah Gerak):**
+  - **Mendorong / Menarik Objek:** Badan condong ke depan (3/4 serong), kedua tangan memegang stang/beban secara realistis, wajah menatap ke arah tujuan/gerobak (bukan menatap lurus ke kamera seperti patung).
+  - **Sinkronisasi Gerak & Wajah (Anti-Terbalik):** Vektor arah jalan (`walkDir`), orientasi tubuh, kepala, dan langkah kaki harus 100% searah. Jika bergerak ke kiri/kanan/maju, pandangan dan langkah kaki harus sinkron ke arah gerak.
+  - **Anti-Gepeng Tampilan Atas (Volume on Top-Down View):** Saat kamera berada di sudut pandang drone / atas (*high-angle* atau *top-down*), billboard karakter 2D harus memiliki kompensasi sudut kemiringan dinamis (*billboard pitch/tilt*) atau ketebalan volume semu agar tetap terlihat padat dan berisi, tidak gepeng seperti kertas tipis.
+
+---
+
+## 3. Panggung 3D: Restyle Realistis Objek Nyata, Living Environment & Depth of Field
+
+### 3.1 Restyle Akurat Berbasis Referensi Asli (Real-World Restyle Rule)
+Setiap kali menampilkan bangunan, toko, atau fasilitas yang ada di dunia nyata (seperti **Indomaret**, **Alfamart**, stasiun, pasar, dsb.):
+- **Riset Visual Asli Wajib:** Teliti foto fasad asli, proporsi logo, warna khas, dan detail arsitekturnya.
+- **Restyle Menjadi Ciri Khas Seni Kita:**
+  - **Indomaret:** Fasad garis tiga warna (Biru tua, Kuning, Merah), logo persegi merah-kuning berlatar putih dengan font khas Indomaret, plang neon box atas yang terang, pintu kaca geser otomatis dengan stiker sandblast/operasional, serta pylon sign / plang tiang tinggi di depan parkiran.
+  - **Alfamart:** Fasad lis merah tebal dengan aksen kuning-biru, logo Alfamart di atas panel merah menyala, poster promo kaca (seperti JSM / Promo Hebat) yang tertata rapi tanpa teks terpotong (*text-wrapping* presisi), pintu geser kaca, dan tiang reklame khas.
+  - **Interior Kaca Tembus Pandang:** Di balik kaca etalase, wajib terlihat pencahayaan lampu interior hangat, kasir, rak snack berjejer rapi, dan kulkas minuman dingin berpendar.
+
+### 3.2 Environment Hidup & Sinematografi (Living Atmosphere & DoF)
+- **Living Atmosphere:** Panggung 3D harus bernafas dan hidup:
+  - Partikel debu/cahaya (*ambient dust motes / mist*).
+  - Pantulan aspal basah malam hari (*wet asphalt SSR reflection*) yang memantulkan lampu neon toko dan lampu jalan kuning.
+  - Elemen gerak latar belakang: lampu jalan berkedip halus, mobil/motor melintas samar di kejauhan, daun pohon berayun lembut, dan gerimis/kabut tipis.
+- **Depth of Field (DoF) & Sinematik Blur:**
+  - Manfaatkan efek blur kedalaman (*focal blur / bokeh*) pada latar belakang jauh dan foreground dekat untuk memfokuskan mata penonton ke karakter utama atau aksi penting.
+  - Kamera Catmull-Rom spline dengan easing lembut, tilt vertikal 9:16 yang dinamis, dan transisi pencahayaan dramatis antar babak.
+
+---
+
+## 4. Tipografi & Subtitle Estetik (Anti-Kebesaran & Rapi)
+
+- **Ukuran Pas & Proporsional Layar HP:**
+  - `fontSize: 50–54px` (jangan pernah lebih dari 60px agar tidak menutupi visual penting atau tubuh karakter).
+  - `WebkitTextStroke: 6px #000` (outline tegas tapi ramping dan elegan, bukan 14px tebal kotor).
+  - Jarak aman bawah: `bottom: 280–320px` (aman dari tombol like/share/komentar TikTok, Reels, dan Shorts).
+- **Teks Poster & Signage Tanpa Cacat:**
+  - Semua poster etalase (misal `PROMO MINGGU INI`, `2+1 MINUMAN`, `BUKA 24 JAM`) wajib memiliki canvas text wrapping yang rapi, huruf tidak boleh terpotong (seperti `ROM` terpotong), dan ukuran font proporsional dengan bingkai poster.
   - *Eye Saccades:* Lirikan acak mata 1–2 px tiap 1.2–2 detik menjaga karakter tidak tampak seperti patung mati.
   - *Blink Rhythm:* Kedipan 4 frame (`half/shut/shut/half`) dengan sesekali kedipan ganda acak.
   - *Breathing Cycle (`0.22 Hz`):* Dada naik-turun asimetris (tarikan napas sedikit lebih cepat dari hembusan).
