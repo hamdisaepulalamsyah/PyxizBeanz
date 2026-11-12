@@ -24,6 +24,7 @@ import {
   captionPageAt,
   castPoseAt,
   clamp01,
+  lerp,
   gradingAt,
   hookShakeAt,
   parseSentences,
@@ -32,15 +33,17 @@ import {
   shareAt,
   shotStateAt,
   smoothKeys,
+  smoothstep,
   snapKeys,
   transitionAt,
   type CameraSample,
+  type CastPose,
   type LookId,
   type SentenceTiming,
   type WordTiming,
   type WorldId,
 } from './story';
-import { ToonActor, WALK_PHASE_PER_METRE } from './toon';
+import { FACE_CAMERA, ToonActor, WALK_PHASE_PER_METRE, armShare, type Facing } from './toon';
 import { Kit, createBeachWorld, createCityWorld, createClassroomWorld, type WorldScene } from './worlds';
 
 export type HotellingLawProps = {
@@ -57,6 +60,12 @@ export const hotellingCalculateMetadata: CalculateMetadataFunction<HotellingLawP
 
 const LOOK_IDS: readonly LookId[] = ['pembeli', 'kucing', 'profesor', 'pedagangBiru', 'pedagangMerah', 'turis'];
 const FONT = "'Plus Jakarta Sans', 'Montserrat', Arial, sans-serif";
+
+/**
+ * Clean subtitle spec (Pyxis v2.3 §Typography): 52 px, slim 6 px black stroke,
+ * 290 px from the bottom so it clears platform UI without covering the cast.
+ */
+const CAPTION_STYLE = { fontSize: 52, stroke: 6, bottom: 290 } as const;
 
 // ── 3D stage ────────────────────────────────────────────────────────────────
 
@@ -84,6 +93,7 @@ function ThreeStage({ frame, words }: { frame: number; words: readonly WordTimin
 
   const sample = useMemo<CameraSample>(() => ({ position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 45, roll: 0 }), []);
   const camRight = useMemo(() => new THREE.Vector3(), []);
+  const camFwd = useMemo(() => new THREE.Vector3(), []);
 
   // Layout effect: poses the whole frame before <ThreeCanvas> renders it.
   useLayoutEffect(() => {
@@ -123,16 +133,20 @@ function ThreeStage({ frame, words }: { frame: number; words: readonly WordTimin
       const pose = castPoseAt(member, frame, WALK_PHASE_PER_METRE);
       actor.mesh.position.copy(pose.position);
       actor.mesh.scale.setScalar(member.scale ?? 1);
+      const armL = snapKeys(member.armL, 'side', progress, len, 8);
+      const armR = snapKeys(member.armR, 'side', progress, len, 8);
+      const nav = screenFacing(pose, (armShare(armL, 'push') + armShare(armR, 'push')) / 2, camRight, camFwd.setFromMatrixColumn(camera.matrixWorld, 2).negate());
       actor.update(
         {
           frame,
           expression: snapKeys(member.expr, 'neutral', progress, len, 2),
-          armL: snapKeys(member.armL, 'side', progress, len, 8),
-          armR: snapKeys(member.armR, 'side', progress, len, 8),
+          armL,
+          armR,
           speaking: member.speak ?? false,
           look: smoothKeys(member.look, progress),
           walkPhase: pose.walkPhase,
-          walkDir: pose.walkDir,
+          walkDir: nav.walkDir,
+          facing: nav.facing,
           light: { side, rim: grading.rimColor, rimStrength: grading.rimStrength },
           glow: grading.actorGlow,
         },
@@ -140,9 +154,104 @@ function ThreeStage({ frame, words }: { frame: number; words: readonly WordTimin
         camera.position,
       );
     }
-  }, [frame, words, camera, scene, rig, sample, camRight]);
+  }, [frame, words, camera, scene, rig, sample, camRight, camFwd]);
 
   return null;
+}
+
+/**
+ * Projects the world travel / push direction onto the screen so stride, body,
+ * head and eyes all point the way the actor is really going for this camera.
+ */
+function screenFacing(pose: CastPose, push: number, right: THREE.Vector3, fwd: THREE.Vector3): { walkDir: number; facing: Facing } {
+  const lat = pose.heading.dot(right);
+  const into = pose.heading.dot(fwd);
+  const walkDir = lat >= 0 ? 1 : -1;
+  const moveAmt = clamp01(Math.abs(lat) * 1.6) * pose.moving;
+  const away = smoothstep(0.55, 0.85, into) * pose.moving;
+  // Hands on a cart handle: face the cart even while easing it back (a back-pedal).
+  const pushLat = pose.pushDirX * right.x;
+  const pushAmt = clamp01(push) * clamp01(Math.abs(pushLat) * 1.6);
+  if (pushAmt > 0.01 && pushAmt >= moveAmt * 0.5) {
+    return { walkDir, facing: { dir: pushLat >= 0 ? 1 : -1, amount: Math.max(pushAmt, moveAmt), away: 0 } };
+  }
+  if (moveAmt + away < 0.01) return { walkDir, facing: FACE_CAMERA };
+  return { walkDir, facing: { dir: walkDir, amount: moveAmt, away } };
+}
+
+// ── Depth of field ──────────────────────────────────────────────────────────
+
+const dofCam = new THREE.PerspectiveCamera(45, HOTELLING_WIDTH / HOTELLING_HEIGHT, 0.05, 300);
+const dofSample: CameraSample = { position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 45, roll: 0 };
+const dofPt = new THREE.Vector3();
+
+/**
+ * Focal band (screen px) around the cast for this frame: the same camera the
+ * stage uses projects every actor's feet and head, so focus always rides on
+ * the characters and their action while the far set and near ground soften.
+ */
+export function focusBandAt(frame: number): { top: number; bottom: number; blur: number } {
+  sampleCamera(frame, dofSample);
+  dofCam.position.copy(dofSample.position);
+  dofCam.up.set(0, 1, 0);
+  dofCam.lookAt(dofSample.target);
+  dofCam.rotateZ(dofSample.roll);
+  dofCam.fov = dofSample.fov;
+  dofCam.updateProjectionMatrix();
+  dofCam.updateMatrixWorld();
+  const H = HOTELLING_HEIGHT;
+  let top = Infinity;
+  let bottom = -Infinity;
+  const { shot } = shotStateAt(frame);
+  for (const member of shot.cast) {
+    const pose = castPoseAt(member, frame, WALK_PHASE_PER_METRE);
+    const s = member.scale ?? 1;
+    const pts: [number, number, number][] = [0.25 * s, 0.65 * s, 1.3 * s].map((h) => [pose.position.x, pose.position.y + h, pose.position.z]);
+    // A vendor's cart (incl. the hero cone on its canopy) is part of the action.
+    if (member.follow) {
+      const cartX = pose.position.x - (member.path[0]?.[1] ?? 0);
+      for (const h of [0.7, 1.3, 2.7]) pts.push([cartX, h, pose.position.z - 0.1]);
+    }
+    for (const [px, py, pz] of pts) {
+      dofPt.set(px, py, pz).project(dofCam);
+      if (dofPt.z > 1 || Math.abs(dofPt.x) > 1.25) continue;
+      const y = ((1 - dofPt.y) / 2) * H;
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (!Number.isFinite(top)) {
+    top = H * 0.32;
+    bottom = H * 0.7;
+  }
+  const margin = H * 0.07;
+  top = Math.max(H * 0.12, top - margin);
+  bottom = Math.min(H * 0.92, bottom + margin);
+  if (bottom - top < H * 0.3) {
+    const mid = (top + bottom) / 2;
+    top = mid - H * 0.15;
+    bottom = mid + H * 0.15;
+  }
+  // Drone/map views get a gentler tilt-shift; ground shots a fuller lens blur.
+  const blur = lerp(5, 2.5, smoothstep(3, 9, dofSample.position.y));
+  return { top, bottom, blur };
+}
+
+function DepthOfField({ frame }: { frame: number }) {
+  const { top, bottom, blur } = focusBandAt(frame);
+  const feather = 170;
+  const mask = `linear-gradient(to bottom, #000 0px, #000 ${Math.max(0, top - feather)}px, transparent ${top}px, transparent ${bottom}px, #000 ${bottom + feather}px, #000 100%)`;
+  return (
+    <AbsoluteFill
+      style={{
+        backdropFilter: `blur(${blur.toFixed(2)}px)`,
+        WebkitBackdropFilter: `blur(${blur.toFixed(2)}px)`,
+        maskImage: mask,
+        WebkitMaskImage: mask,
+        pointerEvents: 'none',
+      }}
+    />
+  );
 }
 
 // ── Overlays ────────────────────────────────────────────────────────────────
@@ -263,13 +372,13 @@ function Captions({ frame, words, sentences }: { frame: number; words: readonly 
     <div
       style={{
         position: 'absolute',
-        bottom: CAPTION_FRAMING.bottom,
+        bottom: CAPTION_STYLE.bottom,
         left: CAPTION_FRAMING.sidePadding,
         right: CAPTION_FRAMING.sidePadding,
         textAlign: 'center',
         fontFamily: FONT,
         fontWeight: 900,
-        fontSize: CAPTION_FRAMING.fontSize,
+        fontSize: CAPTION_STYLE.fontSize,
         lineHeight: CAPTION_FRAMING.lineHeight,
         textTransform: 'uppercase',
       }}
@@ -284,10 +393,11 @@ function Captions({ frame, words, sentences }: { frame: number; words: readonly 
                 key={wi}
                 style={{
                   display: 'inline-block',
-                  margin: '0 10px',
+                  margin: '0 7px',
                   color: active ? CAPTION_FRAMING.highlight : said ? '#ffffff' : 'rgba(255,255,255,0.82)',
-                  transform: active ? 'scale(1.1) translateY(-4px)' : 'none',
-                  ...outlined(14),
+                  transform: active ? 'scale(1.06) translateY(-2px)' : 'none',
+                  ...outlined(CAPTION_STYLE.stroke),
+                  textShadow: '0 3px 10px rgba(0,0,0,0.55)',
                 }}
               >
                 {w.text}
@@ -317,7 +427,7 @@ function useFontGuard(): boolean {
     link.rel = 'stylesheet';
     link.href = DIEGETIC_FONT_CSS;
     link.onload = () => {
-      const faces = [`900 ${CAPTION_FRAMING.fontSize}px "Plus Jakarta Sans"`, ...DIEGETIC_FONT_FACES];
+      const faces = [`900 ${CAPTION_STYLE.fontSize}px "Plus Jakarta Sans"`, ...DIEGETIC_FONT_FACES];
       if (document.fonts?.load) Promise.all(faces.map((f) => document.fonts.load(f))).then(done, done);
       else done();
     };
@@ -374,6 +484,8 @@ export function HotellingLaw({ words: wordsProp, sentences: sentencesProp }: Hot
           <ThreeStage frame={frame} words={words} />
         </ThreeCanvas>
       ) : null}
+
+      {fontsReady ? <DepthOfField frame={frame} /> : null}
 
       {/* Painterly vignette + warm grain, then a bottom scrim for captions. */}
       <AbsoluteFill style={{ background: 'radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 55%, rgba(20,8,24,0.55) 100%)', pointerEvents: 'none' }} />

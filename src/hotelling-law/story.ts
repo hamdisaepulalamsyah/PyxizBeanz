@@ -288,6 +288,13 @@ const LOOP_KEY: Omit<CameraKey, 't'> = { pos: [0.45, 0.5, 2.6], target: [0.05, 0
 const BEACH_MAP: Omit<CameraKey, 't'> = { pos: [0, 14.2, 6.2], target: [0, 0, 0.55], fov: 50, roll: HALF_PI };
 
 const PEMBELI_HOME: readonly [number, number, number, number] = [0, -0.05, CURB_H, -1.75];
+/** Vendor offset from cart centre while idling beside it. */
+const VENDOR_STAND = 0.85;
+/**
+ * Vendor offset while pushing: behind the handle grip (±1.0 m, 0.8 m high) so
+ * both hands, leaning in at a 3/4 turn, land on it.
+ */
+const VENDOR_PUSH = 1.3;
 
 export const SHOTS: readonly Shot[] = [
   {
@@ -410,8 +417,8 @@ export const SHOTS: readonly Shot[] = [
         armL: [[0, 'side']],
         look: [[0, -0.6]],
       },
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'wave']] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, 0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'wave']], armR: [[0, 'side']] },
+      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'wave']] },
+      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'wave']], armR: [[0, 'side']] },
     ],
   },
   {
@@ -428,8 +435,8 @@ export const SHOTS: readonly Shot[] = [
       { t: 1, pos: [0.25, 11.6, 5.6], target: [0, 0, 0.5], fov: 48, roll: HALF_PI + 0.03 },
     ],
     cast: [
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'hip']] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, 0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'hip']], armR: [[0, 'side']] },
+      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'hip']] },
+      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'hip']], armR: [[0, 'side']] },
     ],
   },
   {
@@ -448,8 +455,8 @@ export const SHOTS: readonly Shot[] = [
       { t: 1, pos: [2.2, 1.35, 4.2], target: [4.5, 1.05, 0.1], fov: 42, roll: 0.02 },
     ],
     cast: [
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -0.85, 0, CART_Z + 0.1]], expr: [[0, 'laugh']], armL: [[0, 'side']], armR: [[0, 'open']], look: [[0, 0.5]] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, 0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'open']], armR: [[0, 'side']], look: [[0, -0.5]] },
+      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'laugh']], armL: [[0, 'side']], armR: [[0, 'open']], look: [[0, 0.5]] },
+      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'open']], armR: [[0, 'side']], look: [[0, -0.5]] },
     ],
   },
   {
@@ -471,9 +478,10 @@ export const SHOTS: readonly Shot[] = [
       {
         id: 'pedagangBiru',
         follow: 'blueCart',
-        path: [[0, -0.85, 0, CART_Z + 0.1]],
+        path: [[0, -VENDOR_PUSH, 0, CART_Z + 0.1]],
         expr: [
-          [0, 'smirk'],
+          [0, 'serious'],
+          [0.4, 'smirk'],
           [0.75, 'laugh'],
         ],
         armL: [[0, 'push']],
@@ -485,7 +493,7 @@ export const SHOTS: readonly Shot[] = [
       {
         id: 'pedagangMerah',
         follow: 'redCart',
-        path: [[0, 0.85, 0, CART_Z + 0.1]],
+        path: [[0, VENDOR_PUSH, 0, CART_Z + 0.1]],
         expr: [
           [0, 'neutral'],
           [0.62, 'shock'],
@@ -507,15 +515,15 @@ export const SHOTS: readonly Shot[] = [
     cut: 'flash',
     chip: 'MERAH MEMBALAS',
     camera: [
-      { t: 0, pos: [5.8, 1.5, 4.3], target: [3.9, 0.95, 0.15], fov: 42, roll: 0.025 },
-      { t: 0.55, pos: [3.5, 1.55, 4.6], target: [1.7, 0.95, 0.15], fov: 44 },
-      { t: 1, pos: [1.3, 1.6, 5.0], target: [0, 0.95, 0.1], fov: 46, roll: -0.01 },
+      { t: 0, pos: [6.6, 1.55, 4.6], target: [5.0, 0.95, 0.15], fov: 44, roll: 0.025 },
+      { t: 0.55, pos: [4.4, 1.6, 4.8], target: [2.9, 0.95, 0.15], fov: 46 },
+      { t: 1, pos: [1.6, 1.6, 5.0], target: [0.5, 0.95, 0.1], fov: 46, roll: -0.01 },
     ],
     cast: [
       {
         id: 'pedagangMerah',
         follow: 'redCart',
-        path: [[0, 0.85, 0, CART_Z + 0.1]],
+        path: [[0, VENDOR_PUSH, 0, CART_Z + 0.1]],
         expr: [
           [0, 'serious'],
           [0.85, 'smirk'],
@@ -526,7 +534,7 @@ export const SHOTS: readonly Shot[] = [
       {
         id: 'pedagangBiru',
         follow: 'blueCart',
-        path: [[0, -0.85, 0, CART_Z + 0.1]],
+        path: [[0, -VENDOR_PUSH, 0, CART_Z + 0.1]],
         expr: [
           [0, 'laugh'],
           [0.4, 'shock'],
@@ -560,8 +568,8 @@ export const SHOTS: readonly Shot[] = [
       { t: 1, pos: [0, 12.4, 5.3], target: [0, 0, 0.5], fov: 48, roll: HALF_PI },
     ],
     cast: [
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.3, 'laugh']], armL: [[0, 'side']], armR: [[0, 'wave']], look: [[0, 0.6]] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, 0.85, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.35, 'laugh']], armL: [[0, 'wave']], armR: [[0, 'side']], look: [[0, -0.6]] },
+      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.3, 'laugh']], armL: [[0, 'side']], armR: [[0, 'wave']], look: [[0, 0.6]] },
+      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.35, 'laugh']], armL: [[0, 'wave']], armR: [[0, 'side']], look: [[0, -0.6]] },
     ],
   },
   {
@@ -743,6 +751,12 @@ export interface CastPose {
   walkDir: number;
   /** Ground speed in m/frame. */
   speed: number;
+  /** Unit world-space travel direction (y = 0); zero vector when standing. */
+  heading: THREE.Vector3;
+  /** 0…1 how committed the actor is to moving (eases facing in/out). */
+  moving: number;
+  /** World +x / −x side a cart-follower pushes toward (0 if not following a cart). */
+  pushDirX: number;
 }
 
 const tmpA = new THREE.Vector3();
@@ -766,13 +780,20 @@ export function castPoseAt(member: CastMember, frame: number, walkPhasePerMetre:
   }
   pathPoint(member, pAt(frame - 1), frame - 1, tmpA);
   const dx = position.x - tmpA.x;
-  const speed = Math.hypot(dx, position.z - tmpA.z);
+  const dz = position.z - tmpA.z;
+  const speed = Math.hypot(dx, dz);
   const scale = member.scale ?? 1;
+  const heading = speed > 1e-5 ? new THREE.Vector3(dx / speed, 0, dz / speed) : new THREE.Vector3();
+  const offsetX = member.path[0]?.[1] ?? 0;
   return {
     position,
     walkPhase: speed > 0.0012 ? (travelled / scale) * walkPhasePerMetre : null,
     walkDir: dx >= 0 ? 1 : -1,
     speed,
+    heading,
+    moving: smoothstep(0.0012, 0.007, speed),
+    // The vendor stands behind the handle, so the cart is on the opposite side of the offset.
+    pushDirX: member.follow ? (offsetX <= 0 ? 1 : -1) : 0,
   };
 }
 

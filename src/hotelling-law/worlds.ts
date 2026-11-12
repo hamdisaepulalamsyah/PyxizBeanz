@@ -32,11 +32,13 @@ import {
   loopWave,
   shareAt,
   smoothstep,
+  type ArmPose,
   type ColorGrading,
+  type Expression,
   type Vec3,
   type WorldId,
 } from './story';
-import { createToonGradient } from './toon';
+import { EXTRA_CARD_PX, beachExtraLook, billboardPitch, createExtraCardGeometry, createToonGradient, paintExtra, type ExtraPosture, type ExtraSpec } from './toon';
 
 const PLUM = '#241726';
 
@@ -306,6 +308,16 @@ function beamCone(kit: Kit, parent: THREE.Object3D, color: THREE.ColorRepresenta
   return m;
 }
 
+/** Largest font size ≤ `size` at which `text` fits inside `maxW` (signage never clips). */
+function fitFont(g: CanvasRenderingContext2D, text: string, maxW: number, size: number, weight: string, font: string): number {
+  let s = size;
+  g.font = `${weight} ${s}px ${font}`;
+  const w = g.measureText(text).width;
+  if (w > maxW) s = Math.floor(size * (maxW / w));
+  g.font = `${weight} ${s}px ${font}`;
+  return s;
+}
+
 function textCanvas(text: string, opts: { w: number; h: number; bg: string; fg: string; font: string; size: number; stroke?: string; border?: string }): Paint {
   return (g, w, h) => {
     g.fillStyle = opts.bg;
@@ -316,17 +328,17 @@ function textCanvas(text: string, opts: { w: number; h: number; bg: string; fg: 
       g.lineWidth = h * 0.06;
       g.strokeRect(h * 0.05, h * 0.05, w - h * 0.1, h - h * 0.1);
     }
-    g.font = `900 ${opts.size}px ${opts.font}`;
+    const size = fitFont(g, text, w - h * 0.5, opts.size, '900', opts.font);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     if (opts.stroke) {
       g.strokeStyle = opts.stroke;
-      g.lineWidth = opts.size * 0.12;
+      g.lineWidth = size * 0.12;
       g.lineJoin = 'round';
-      g.strokeText(text, w / 2, h / 2 + opts.size * 0.04);
+      g.strokeText(text, w / 2, h / 2 + size * 0.04);
     }
     g.fillStyle = opts.fg;
-    g.fillText(text, w / 2, h / 2 + opts.size * 0.04);
+    g.fillText(text, w / 2, h / 2 + size * 0.04);
   };
 }
 
@@ -340,6 +352,7 @@ const GROUND_FLOOR = 3.25;
 
 interface Brand {
   name: string;
+  kind: 'indomaret' | 'alfamart';
   x: number;
   primary: string;
   secondary: string;
@@ -350,39 +363,134 @@ interface Brand {
   seed: number;
 }
 
-const INDOMARET: Brand = { name: 'Indomaret', x: -(STORE_W / 2 + 0.1), primary: '#0b4fb5', secondary: '#f4f1ea', stripeA: '#e3162b', stripeB: '#ffd21f', awning: '#1d5fd1', neon: '#62b6ff', seed: 11 };
-const ALFAMART: Brand = { name: 'alfamart', x: STORE_W / 2 + 0.1, primary: '#d6121b', secondary: '#f7efe6', stripeA: '#1f4fb0', stripeB: '#ffd21f', awning: '#d81e26', neon: '#ff5d6c', seed: 23 };
+// Real-world palettes: Indomaret = navy blue / yellow / red bands with a white
+// logo box; Alfamart = bold red fascia with yellow accent and white wordmark.
+const INDOMARET: Brand = { name: 'Indomaret', kind: 'indomaret', x: -(STORE_W / 2 + 0.1), primary: '#0b3d91', secondary: '#f4f1ea', stripeA: '#e3162b', stripeB: '#ffd21f', awning: '#1d5fd1', neon: '#62b6ff', seed: 11 };
+const ALFAMART: Brand = { name: 'alfamart', kind: 'alfamart', x: STORE_W / 2 + 0.1, primary: '#d6121b', secondary: '#f7efe6', stripeA: '#1f4fb0', stripeB: '#ffd21f', awning: '#d81e26', neon: '#ff5d6c', seed: 23 };
+
+/** Brand logo drawn inside (x, y, w, h): Indomaret white box wordmark, Alfamart mark + white wordmark. */
+function drawLogo(g: CanvasRenderingContext2D, b: Brand, x: number, y: number, w: number, h: number, onRed = true): void {
+  g.save();
+  g.textBaseline = 'middle';
+  g.lineJoin = 'round';
+  if (b.kind === 'indomaret') {
+    // White rounded logo box, navy italic wordmark, red + yellow underline bars.
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.roundRect(x, y, w, h, h * 0.12);
+    g.fill();
+    g.strokeStyle = '#0a2a66';
+    g.lineWidth = Math.max(2, h * 0.04);
+    g.stroke();
+    g.textAlign = 'center';
+    const size = fitFont(g, 'Indomaret', w * 0.86, h * 0.56, 'italic 900', SIGN_FONT);
+    g.fillStyle = '#0b3d91';
+    g.fillText('Indomaret', x + w / 2, y + h * 0.42);
+    const barW = Math.min(w * 0.8, g.measureText('Indomaret').width);
+    g.fillStyle = '#e3162b';
+    g.fillRect(x + w / 2 - barW / 2, y + h * 0.42 + size * 0.42, barW, h * 0.08);
+    g.fillStyle = '#ffd21f';
+    g.fillRect(x + w / 2 - barW / 2, y + h * 0.42 + size * 0.42 + h * 0.08, barW, h * 0.07);
+  } else {
+    // Logomark: rounded tile with a red "a" and yellow/blue swoosh, then the wordmark.
+    const t = h * 0.86;
+    const tx = x + h * 0.07;
+    const ty = y + (h - t) / 2;
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.roundRect(tx, ty, t, t, t * 0.22);
+    g.fill();
+    g.fillStyle = '#ffd21f';
+    g.beginPath();
+    g.ellipse(tx + t * 0.5, ty + t * 0.78, t * 0.4, t * 0.12, -0.25, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#1f4fb0';
+    g.beginPath();
+    g.ellipse(tx + t * 0.62, ty + t * 0.84, t * 0.26, t * 0.06, -0.25, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#d6121b';
+    g.textAlign = 'center';
+    fitFont(g, 'a', t * 0.8, t * 0.82, '900', SIGN_FONT);
+    g.fillText('a', tx + t * 0.5, ty + t * 0.44);
+    g.textAlign = 'left';
+    const tw = w - t - h * 0.3;
+    fitFont(g, 'alfamart', tw, h * 0.72, 'italic 900', SIGN_FONT);
+    if (onRed) {
+      g.strokeStyle = '#8f0b12';
+      g.lineWidth = h * 0.06;
+      g.strokeText('alfamart', tx + t + h * 0.14, y + h * 0.5);
+    }
+    g.fillStyle = onRed ? '#ffffff' : '#d6121b';
+    g.fillText('alfamart', tx + t + h * 0.14, y + h * 0.5);
+  }
+  g.restore();
+}
 
 function signPaint(b: Brand): Paint {
   return (g, w, h) => {
-    vGradient(g, w, h, [
-      [0, shadeHex(b.primary, 0.12)],
-      [0.7, b.primary],
-      [1, shadeHex(b.primary, -0.25)],
-    ]);
-    // Stripe band (logo colours) along the bottom.
-    g.fillStyle = b.stripeA;
-    g.fillRect(0, h * 0.76, w, h * 0.09);
-    g.fillStyle = b.stripeB;
-    g.fillRect(0, h * 0.85, w, h * 0.09);
-    g.fillStyle = 'rgba(255,255,255,0.85)';
-    g.fillRect(0, h * 0.04, w, h * 0.025);
-    brush(g, w, h, b.seed, 220, ['#ffffff', '#000000'], 0.045, 60, 10);
-    g.font = `italic 900 ${h * 0.56}px ${SIGN_FONT}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.lineJoin = 'round';
-    g.strokeStyle = shadeHex(b.primary, -0.55);
-    g.lineWidth = h * 0.07;
-    g.strokeText(b.name, w / 2, h * 0.42);
-    g.fillStyle = '#ffffff';
-    g.fillText(b.name, w / 2, h * 0.42);
-    // Soft bloom inside the box.
+    if (b.kind === 'indomaret') {
+      // Signature lisplang: navy blue, yellow and red bands.
+      g.fillStyle = '#0b3d91';
+      g.fillRect(0, 0, w, h * 0.56);
+      g.fillStyle = '#ffd21f';
+      g.fillRect(0, h * 0.56, w, h * 0.2);
+      g.fillStyle = '#e3162b';
+      g.fillRect(0, h * 0.76, w, h * 0.24);
+      g.fillStyle = 'rgba(255,255,255,0.35)';
+      g.fillRect(0, h * 0.03, w, h * 0.02);
+      brush(g, w, h, b.seed, 220, ['#ffffff', '#000000'], 0.04, 60, 10);
+      drawLogo(g, b, w * 0.2, h * 0.1, w * 0.6, h * 0.8);
+    } else {
+      // Thick glowing red panel with yellow accent band.
+      vGradient(g, w, h, [
+        [0, '#ef2b2f'],
+        [0.7, '#d6121b'],
+        [1, '#a50d14'],
+      ]);
+      g.fillStyle = '#ffd21f';
+      g.fillRect(0, h * 0.82, w, h * 0.12);
+      g.fillStyle = '#1f4fb0';
+      g.fillRect(0, h * 0.94, w, h * 0.06);
+      brush(g, w, h, b.seed, 220, ['#ffffff', '#000000'], 0.04, 60, 10);
+      drawLogo(g, b, w * 0.16, h * 0.1, w * 0.68, h * 0.66);
+    }
+    // Soft bloom inside the lightbox.
     const r = g.createRadialGradient(w / 2, h * 0.42, 0, w / 2, h * 0.42, w * 0.5);
-    r.addColorStop(0, 'rgba(255,255,255,0.18)');
+    r.addColorStop(0, 'rgba(255,255,255,0.16)');
     r.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = r;
     g.fillRect(0, 0, w, h);
+  };
+}
+
+/** Pylon / blade lightbox face: logo on top, "BUKA 24 JAM" below. */
+function pylonPaint(b: Brand): Paint {
+  return (g, w, h) => {
+    g.fillStyle = b.kind === 'indomaret' ? '#ffffff' : '#d6121b';
+    g.fillRect(0, 0, w, h);
+    if (b.kind === 'indomaret') {
+      g.fillStyle = '#0b3d91';
+      g.fillRect(0, 0, w, h * 0.62);
+      drawLogo(g, b, w * 0.06, h * 0.1, w * 0.88, h * 0.42);
+      g.fillStyle = '#ffd21f';
+      g.fillRect(0, h * 0.62, w, h * 0.08);
+      g.fillStyle = '#e3162b';
+      g.fillRect(0, h * 0.7, w, h * 0.3);
+    } else {
+      drawLogo(g, b, w * 0.04, h * 0.14, w * 0.92, h * 0.34);
+      g.fillStyle = '#ffd21f';
+      g.fillRect(0, h * 0.62, w, h * 0.08);
+      g.fillStyle = '#a50d14';
+      g.fillRect(0, h * 0.7, w, h * 0.3);
+    }
+    g.fillStyle = '#ffffff';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    fitFont(g, 'BUKA 24 JAM', w * 0.84, h * 0.17, '900', SIGN_FONT);
+    g.fillText('BUKA 24 JAM', w / 2, h * 0.85);
+    g.strokeStyle = PLUM;
+    g.lineWidth = 6;
+    g.strokeRect(3, 3, w - 6, h - 6);
   };
 }
 
@@ -449,17 +557,48 @@ function fridgePaint(seed: number): Paint {
   };
 }
 
+/**
+ * Window poster: kicker band, auto-fitted headline (wrapped to two lines if
+ * needed), auto-fitted sub line and a price burst — nothing ever clips.
+ */
 function posterPaint(text: string, sub: string, bg: string, fg: string): Paint {
   return (g, w, h) => {
     g.fillStyle = bg;
     g.fillRect(0, 0, w, h);
-    g.fillStyle = fg;
-    g.font = `900 ${h * 0.34}px ${SIGN_FONT}`;
+    brush(g, w, h, text.length * 7 + sub.length, 60, ['#ffffff', '#000000'], 0.05, 30, 6);
+    const pad = w * 0.1;
+    const maxW = w - pad * 2;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText(text, w / 2, h * 0.38);
-    g.font = `800 ${h * 0.16}px ${SIGN_FONT}`;
-    g.fillText(sub, w / 2, h * 0.74);
+    // Headline: one line if it fits at a readable size, else split on the space.
+    const words = text.split(' ');
+    const lines = words.length > 1 && fitFont(g, text, maxW, h * 0.26, '900', SIGN_FONT) < h * 0.15 ? [words.slice(0, Math.ceil(words.length / 2)).join(' '), words.slice(Math.ceil(words.length / 2)).join(' ')] : [text];
+    const size = Math.min(...lines.map((l) => fitFont(g, l, maxW, lines.length > 1 ? h * 0.17 : h * 0.26, '900', SIGN_FONT)));
+    g.font = `900 ${size}px ${SIGN_FONT}`;
+    g.fillStyle = fg;
+    const top = lines.length > 1 ? h * 0.24 : h * 0.34;
+    lines.forEach((l, i) => g.fillText(l, w / 2, top + i * size * 1.08));
+    // Sub line on a contrasting ribbon.
+    const subSize = fitFont(g, sub, maxW * 0.92, h * 0.12, '800', SIGN_FONT);
+    const ry = h * 0.66;
+    g.fillStyle = fg;
+    g.fillRect(pad * 0.5, ry - subSize * 0.75, w - pad, subSize * 1.5);
+    g.fillStyle = bg;
+    g.font = `800 ${subSize}px ${SIGN_FONT}`;
+    g.fillText(sub, w / 2, ry + subSize * 0.04);
+    // Price burst.
+    g.fillStyle = fg;
+    g.beginPath();
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      const r = k % 2 ? w * 0.1 : w * 0.13;
+      g.lineTo(w * 0.78 + Math.cos(a) * r, h * 0.86 + Math.sin(a) * r);
+    }
+    g.closePath();
+    g.fill();
+    g.fillStyle = bg;
+    fitFont(g, '-30%', w * 0.17, h * 0.06, '900', SIGN_FONT);
+    g.fillText('-30%', w * 0.78, h * 0.86);
     g.strokeStyle = fg;
     g.lineWidth = 6;
     g.strokeRect(8, 8, w - 16, h - 16);
@@ -472,6 +611,8 @@ interface StoreRig {
   signLight: THREE.PointLight;
   glows: THREE.Sprite[];
   streaks: THREE.MeshBasicMaterial[];
+  /** Self-lit faces of the roadside pylon sign. */
+  pylon: THREE.MeshBasicMaterial;
 }
 
 function buildStore(kit: Kit, parent: THREE.Object3D, b: Brand, streak: THREE.Texture): StoreRig {
@@ -529,21 +670,42 @@ function buildStore(kit: Kit, parent: THREE.Object3D, b: Brand, streak: THREE.Te
     kit.mesh(interior, new THREE.PlaneGeometry(W * 0.62, 1.45), mat, [(i % 2 ? 0.25 : -0.2) + (i === 2 ? 0.1 : 0), 0.73, z], { ink: false });
     kit.box(interior, [W * 0.62, 0.06, 0.4], kit.basic({ color: '#bdb3a4' }), [(i % 2 ? 0.25 : -0.2) + (i === 2 ? 0.1 : 0), 1.48, z - 0.2], { ink: false });
   });
-  // Cashier counter + a bean-head cashier silhouette.
-  kit.box(interior, [0.9, 0.95, 0.5], kit.basic({ color: b.primary }), [b.x < 0 ? 1.0 : -1.0, 0.48, -0.55], { ink: false });
-  const cashier = kit.canvas(256, 384, (c, w, h) => {
-    c.clearRect(0, 0, w, h);
-    c.fillStyle = 'rgba(70, 40, 50, 0.85)';
-    c.beginPath();
-    c.ellipse(w / 2, h * 0.27, w * 0.27, h * 0.17, 0, 0, Math.PI * 2);
-    c.fill();
-    c.beginPath();
-    c.moveTo(w * 0.15, h);
-    c.quadraticCurveTo(w * 0.18, h * 0.45, w / 2, h * 0.44);
-    c.quadraticCurveTo(w * 0.82, h * 0.45, w * 0.85, h);
-    c.fill();
-  });
-  kit.mesh(interior, new THREE.PlaneGeometry(0.62, 0.93), kit.basic({ map: cashier, transparent: true, depthWrite: false }), [b.x < 0 ? 1.0 : -1.0, 1.05, -0.95], { ink: false });
+  // Cashier counter + a Bean-Head cashier in the brand polo (unified extras).
+  const cashierX = b.x < 0 ? 1.0 : -1.0;
+  kit.box(interior, [0.9, 0.95, 0.5], kit.basic({ color: b.primary }), [cashierX, 0.48, -0.55], { ink: false });
+  kit.box(interior, [0.92, 0.05, 0.54], kit.basic({ color: '#e9e2d4' }), [cashierX, 0.97, -0.55], { ink: false });
+  kit.box(interior, [0.3, 0.2, 0.06], kit.basic({ color: '#1f2937' }), [cashierX + 0.15, 1.1, -0.6], { ink: false });
+  const cashierSpec: ExtraSpec = {
+    look: {
+      kind: 'human',
+      skin: b.kind === 'indomaret' ? '#e7b48e' : '#d9a07a',
+      skinShade: b.kind === 'indomaret' ? '#c99070' : '#b47b58',
+      hair: 'short',
+      hairColor: '#1f1410',
+      browColor: '#1f1410',
+      hatColor: '#000000',
+      top: 'polo',
+      topColor: b.kind === 'indomaret' ? '#1d4ed8' : '#dc2626',
+      topAccent: b.stripeB,
+      shortSleeve: true,
+      apron: false,
+      bottomColor: '#1f2937',
+      shoeUpper: '#111827',
+      shoeAccent: '#f8fafc',
+      glasses: b.kind === 'alfamart',
+      mustache: false,
+    },
+    posture: 'stand',
+    expression: 'warm',
+    armL: 'side',
+    armR: 'side',
+    look3: b.x < 0 ? -0.35 : 0.35,
+    frame: 4,
+    seed: b.seed * 3,
+  };
+  const cashierTex = kit.canvas(EXTRA_CARD_PX.w, EXTRA_CARD_PX.h, (c) => paintExtra(c, cashierSpec, { side: 1, rim: '#ffe2b0', rimStrength: 0.5 }));
+  const cashierCard = kit.mesh(interior, createExtraCardGeometry(), kit.basic({ map: cashierTex, alphaTest: 0.5, color: '#fff1dc' }), [cashierX, 0.02, -0.95], { ink: false });
+  cashierCard.scale.setScalar(0.95);
 
   // Glass + mullions + door.
   const glassMat = kit.basic({ color: '#cfe3ff', transparent: true, opacity: 0.2, depthWrite: false });
@@ -565,8 +727,42 @@ function buildStore(kit: Kit, parent: THREE.Object3D, b: Brand, streak: THREE.Te
   for (const x of [-W / 2 + 0.1, -0.5, 0.5, W / 2 - 0.1]) kit.box(g, [0.07, glassTop - glassBottom, 0.08], alu, [x, (glassTop + glassBottom) / 2, 0.04]);
   kit.box(g, [W - 0.1, 0.08, 0.09], alu, [0, glassTop, 0.04]);
   kit.box(g, [W - 0.1, 0.06, 0.09], alu, [0, glassBottom, 0.04]);
-  kit.box(g, [0.04, 0.32, 0.05], kit.toon('#e5e7eb'), [-0.08, 1.15, 0.09]);
-  kit.box(g, [0.04, 0.32, 0.05], kit.toon('#e5e7eb'), [0.08, 1.15, 0.09]);
+  // Automatic sliding door (no handles): sensor box above, meeting-line rubber
+  // strips, operational stickers and a frosted brand safety band across the glass.
+  kit.box(g, [0.36, 0.1, 0.12], kit.toon('#2a2632'), [0, glassTop - 0.1, 0.1], { ink: 0.006 });
+  kit.mesh(g, new THREE.CircleGeometry(0.018, 12), kit.basic({ color: '#ff3b3b' }), [0.12, glassTop - 0.1, 0.165], { ink: false });
+  kit.box(g, [0.025, glassTop - glassBottom - 0.12, 0.03], kit.toon('#1c1a22'), [0, (glassTop + glassBottom) / 2, 0.05], { ink: false });
+  const doorSticker = kit.canvas(256, 200, (c, w, h) => {
+    c.fillStyle = '#ffffff';
+    c.beginPath();
+    c.roundRect(4, 4, w - 8, h - 8, 18);
+    c.fill();
+    c.lineWidth = 6;
+    c.strokeStyle = b.primary;
+    c.stroke();
+    drawLogo(c, b, w * 0.1, h * 0.06, w * 0.8, h * 0.28, false);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = '#1f2937';
+    fitFont(c, 'PINTU OTOMATIS', w * 0.84, h * 0.13, '900', SIGN_FONT);
+    c.fillText('PINTU OTOMATIS', w / 2, h * 0.5);
+    c.fillStyle = b.primary;
+    fitFont(c, 'BUKA 24 JAM', w * 0.84, h * 0.14, '900', SIGN_FONT);
+    c.fillText('BUKA 24 JAM', w / 2, h * 0.68);
+    c.fillStyle = '#6b7280';
+    fitFont(c, 'QRIS • DEBIT • TUNAI', w * 0.84, h * 0.09, '800', SIGN_FONT);
+    c.fillText('QRIS • DEBIT • TUNAI', w / 2, h * 0.85);
+  });
+  for (const x of [-0.25, 0.25]) kit.mesh(g, new THREE.PlaneGeometry(0.3, 0.23), kit.basic({ map: doorSticker }), [x, 1.5, 0.045], { ink: 0.004 });
+  const band = kit.canvas(1024, 64, (c, w, h) => {
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(255,255,255,0.55)';
+    c.fillRect(0, 0, w, h);
+    c.fillStyle = b.primary;
+    c.fillRect(0, h * 0.84, w, h * 0.16);
+    for (let k = 0; k < 4; k++) drawLogo(c, b, 20 + k * (w / 4), h * 0.1, w / 4 - 40, h * 0.66, false);
+  });
+  kit.mesh(g, new THREE.PlaneGeometry(W - 0.24, 0.12), kit.basic({ map: band, transparent: true, depthWrite: false }), [0, 1.2, 0.035], { ink: false });
   // Promo posters and the 24h sticker on the glass.
   kit.mesh(g, new THREE.PlaneGeometry(0.62, 0.84), kit.basic({ map: kit.canvas(256, 340, posterPaint('PROMO', 'HEMAT!', b.stripeB, b.primary)) }), [-1.05, 1.0, 0.05], { ink: 0.008 });
   kit.mesh(g, new THREE.PlaneGeometry(0.62, 0.84), kit.basic({ map: kit.canvas(256, 340, posterPaint('2+1', 'MINUMAN', b.primary, '#ffffff')) }), [1.05, 1.0, 0.05], { ink: 0.008 });
@@ -687,7 +883,30 @@ function buildStore(kit: Kit, parent: THREE.Object3D, b: Brand, streak: THREE.Te
   addStreak(-0.6, 0.9, 4.5, '#ffd9a0', 0.32);
   addStreak(0.7, 0.9, 4.2, '#ffd9a0', 0.3);
 
-  return { neon, sign: signMat, signLight, glows, streaks };
+  // Roadside pylon sign (plang tiang tinggi) at the curb in front of the store.
+  const pylonX = b.kind === 'indomaret' ? -3.0 : 2.95;
+  const pylon = new THREE.Group();
+  pylon.position.set(pylonX, CURB_H, -1.08);
+  parent.add(pylon);
+  const steel = kit.toon('#4b4f5c');
+  kit.box(pylon, [0.62, 0.3, 0.34], kit.toon('#6b6570'), [0, 0.15, 0], { shadow: true });
+  for (const x of [-0.2, 0.2]) kit.box(pylon, [0.1, 4.3, 0.1], steel, [x, 0.3 + 2.15, 0], { shadow: true });
+  const boxY = 4.6 + 0.62;
+  kit.box(pylon, [1.0, 1.36, 0.24], kit.toon(shadeHex(b.primary, -0.45)), [0, boxY, 0], { shadow: true, ink: 0.014 });
+  const pylonMat = kit.basic({ map: kit.canvas(320, 440, pylonPaint(b)) });
+  for (const s of [-1, 1]) {
+    kit.mesh(pylon, new THREE.PlaneGeometry(0.92, 1.28), pylonMat, [0, boxY, s * 0.125], { ink: false, rot: [0, s > 0 ? 0 : Math.PI, 0] });
+  }
+  kit.glow(pylon, b.neon, 3.2, [0, boxY, 0.4], 0.35);
+  const pylonLight = new THREE.PointLight(b.neon, 2.5, 6, 1.6);
+  pylonLight.position.set(0, boxY - 0.9, 0.8);
+  pylon.add(pylonLight);
+  // Its wet-road reflection.
+  const pm = kit.additive(b.neon, streak, 0.5);
+  streaks.push(pm);
+  kit.mesh(parent, new THREE.PlaneGeometry(0.9, 5.5), pm, [pylonX, 0.009, -0.9 + 2.75], { ink: false, rot: [-Math.PI / 2, 0, 0] }).renderOrder = 3;
+
+  return { neon, sign: signMat, signLight, glows, streaks, pylon: pylonMat };
 }
 
 function windowPaint(seed: number, lit: boolean): Paint {
@@ -825,7 +1044,8 @@ function buildStreetLamp(kit: Kit, parent: THREE.Object3D, x: number, z: number,
   light.position.set(0, 5.8, headZ);
   light.target = target;
   g.add(light);
-  beamCone(kit, g, '#ffb35c', 1.9, 5.6, [0, 5.85, headZ], 0.06);
+  beamCone(kit, g, '#ffb35c', 1.9, 5.6, [0, 5.85, headZ], 0.08);
+  beamCone(kit, g, '#ffd28a', 0.9, 5.4, [0, 5.85, headZ], 0.07);
   return { glow, light };
 }
 
@@ -1071,7 +1291,7 @@ export function createCityWorld(kit: Kit): WorldScene {
   buildScooter(kit, group, [3.6, CURB_H, -1.45], -0.15, '#f8fafc');
   kit.mesh(group, new THREE.CylinderGeometry(0.2, 0.17, 0.62, 14), kit.toon('#15803d'), [-3.6, CURB_H + 0.31, -1.35], { shadow: true });
   const aframe = kit.canvas(256, 320, posterPaint('PROMO', 'MINGGU INI', '#ffd21f', '#0b4fb5'));
-  kit.mesh(group, new THREE.PlaneGeometry(0.5, 0.65), kit.toon('#ffffff', aframe, { side: THREE.DoubleSide }), [-0.95, CURB_H + 0.34, -1.6], { rot: [-0.2, 0.3, 0], shadow: true, ink: 0.01 });
+  kit.mesh(group, new THREE.PlaneGeometry(0.5, 0.65), kit.toon('#ffffff', aframe, { side: THREE.DoubleSide }), [-0.8, CURB_H + 0.34, -1.6], { rot: [-0.2, 0.18, 0], shadow: true, ink: 0.01 });
   kit.box(group, [0.6, 1.5, 0.5], kit.toon('#1e40af'), [-3.0, CURB_H + 0.75, FACADE_Z + 0.55], { shadow: true });
   kit.mesh(group, new THREE.PlaneGeometry(0.4, 0.3), kit.basic({ color: '#7dd3fc' }), [-3.0, CURB_H + 1.05, FACADE_Z + 0.81], { ink: false });
 
@@ -1106,6 +1326,52 @@ export function createCityWorld(kit: Kit): WorldScene {
 
   // Atmosphere: drizzle, ground mist, moths near the lamps.
   const drizzle = driftParticles(kit, group, 520, { min: [-7, 0, -3], max: [7, 7.5, 6] }, '#cfd8ff', 0.035, 0.55, 61);
+  // Gerimis: thin slanted rain streaks catching the neon and sodium light.
+  const RAIN = 420;
+  const rainPos = new Float32Array(RAIN * 6);
+  const rainGeo = kit.track(new THREE.BufferGeometry());
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  const rainMat = kit.track(new THREE.LineBasicMaterial({ color: '#c9d4ff', transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const rain = new THREE.LineSegments(rainGeo, rainMat);
+  rain.frustumCulled = false;
+  group.add(rain);
+  const rainAt = (frame: number): void => {
+    for (let i = 0; i < RAIN; i++) {
+      const cycles = 70 + Math.floor(rnd(141, i) * 40);
+      const y = lerp(7.5, -0.2, loopSaw(frame, cycles, rnd(142, i)));
+      const x = lerp(-8, 8, rnd(143, i)) - (7.5 - y) * 0.06;
+      const z = lerp(-2.6, 7, rnd(144, i));
+      const len = 0.16 + rnd(145, i) * 0.14;
+      rainPos.set([x, y, z, x + len * 0.06, y + len, z], i * 6);
+    }
+    rainGeo.attributes.position!.needsUpdate = true;
+  };
+  // Rain rings spreading on the puddles.
+  const ringTex = kit.canvas(128, 128, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(255,255,255,0.9)';
+    g.lineWidth = 5;
+    g.beginPath();
+    g.arc(w / 2, h / 2, w * 0.42, 0, Math.PI * 2);
+    g.stroke();
+  });
+  const ripples: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number; cycles: number }[] = [];
+  for (let k = 0; k < 18; k++) {
+    const pud = puddles[k % puddles.length] ?? [0, 0, 0];
+    const mat = kit.additive('#b9c6ff', ringTex, 0.4);
+    const mesh = kit.mesh(group, new THREE.PlaneGeometry(1, 1), mat, [pud[0] + (rnd(151, k) - 0.5) * 1.6, 0.007, pud[2] + (rnd(152, k) - 0.5) * 0.6], { ink: false, rot: [-Math.PI / 2, 0, 0] });
+    ripples.push({ mesh, mat, phase: rnd(153, k), cycles: 40 + (k % 5) * 7 });
+  }
+  // Warm sodium light pools on the wet road beneath each lamp.
+  const lampPool = kit.canvas(256, 256, (g, w, h) => {
+    const r = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    r.addColorStop(0, '#ffffff');
+    r.addColorStop(0.45, '#6a6a6a');
+    r.addColorStop(1, '#000000');
+    g.fillStyle = r;
+    g.fillRect(0, 0, w, h);
+  });
+  for (const x of [-4.6, 4.6]) kit.mesh(group, new THREE.PlaneGeometry(4.2, 3.4), kit.additive('#ffb35c', lampPool, 0.28), [x, 0.006, 0.4], { ink: false, rot: [-Math.PI / 2, 0, 0] }).renderOrder = 2;
   const moths = driftParticles(kit, group, 40, { min: [-5.1, 5.1, -0.4], max: [-4.1, 5.9, 0.6] }, '#ffd9a0', 0.05, 0.8, 71);
   const mistTex = kit.canvas(256, 128, (g, w, h) => {
     const r = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
@@ -1155,6 +1421,7 @@ export function createCityWorld(kit: Kit): WorldScene {
     for (const [rig, k] of rigs) {
       for (const m of rig.neon) m.color.set(rig === idm ? INDOMARET.neon : ALFAMART.neon).multiplyScalar(k);
       rig.sign.color.setScalar(0.85 + 0.15 * k);
+      rig.pylon.color.setScalar(0.88 + 0.12 * k);
       rig.signLight.intensity = 6 * k;
       const g0 = rig.glows[0];
       if (g0) g0.material.opacity = 0.45 * k;
@@ -1182,6 +1449,13 @@ export function createCityWorld(kit: Kit): WorldScene {
     }
 
     drizzle(frame, 60, 0.05);
+    rainAt(frame);
+    rainMat.opacity = 0.32 * grading.wetness;
+    for (const r of ripples) {
+      const u = loopSaw(frame, r.cycles, r.phase);
+      r.mesh.scale.setScalar(0.05 + u * 0.45);
+      r.mat.opacity = (1 - u) * 0.45 * grading.wetness;
+    }
     moths(frame, 0, 0.35);
     for (const m of mists) {
       m.sprite.position.x = lerp(-10, 10, loopSaw(frame, m.cycles, m.x));
@@ -1753,11 +2027,21 @@ function buildCart(kit: Kit, parent: THREE.Object3D, color: string, accent: stri
     wheels.push(w);
   }
   kit.mesh(g, new THREE.CylinderGeometry(0.025, 0.025, 0.9, 8), iron, [handleSide * -0.22, WHEEL_R, 0], { rot: [Math.PI / 2, 0, 0], ink: false });
-  // Stand leg on the far end, push handle on the vendor's end.
+  // Stand legs on the far end; push handle on the vendor's end (−handleSide · x),
+  // grip at hand height of the bean-head rig (0.8 m) so both palms rest on it.
   kit.box(g, [0.05, 0.4, 0.05], iron, [handleSide * 0.48, 0.2, 0.22]);
   kit.box(g, [0.05, 0.4, 0.05], iron, [handleSide * 0.48, 0.2, -0.22]);
-  for (const z of [-0.26, 0.26]) kit.box(g, [0.42, 0.04, 0.04], iron, [handleSide * -0.75, 0.98, z], { rot: [0, 0, handleSide * 0.35] });
-  kit.mesh(g, new THREE.CylinderGeometry(0.035, 0.035, 0.6, 10), kit.toon('#1c1917'), [handleSide * -0.94, 1.06, 0], { rot: [Math.PI / 2, 0, 0] });
+  const gripX = handleSide * -1.0;
+  const gripY = 0.8;
+  const barFrom: readonly [number, number] = [handleSide * -0.55, 0.96];
+  const barLen = Math.hypot(gripX - barFrom[0], gripY - barFrom[1]);
+  const barAng = Math.atan2(gripY - barFrom[1], gripX - barFrom[0]);
+  for (const z of [-0.26, 0.26]) {
+    kit.box(g, [barLen, 0.04, 0.04], iron, [(barFrom[0] + gripX) / 2, (barFrom[1] + gripY) / 2, z], { rot: [0, 0, barAng] });
+  }
+  kit.mesh(g, new THREE.CylinderGeometry(0.035, 0.035, 0.6, 10), kit.toon('#1c1917'), [gripX, gripY, 0], { rot: [Math.PI / 2, 0, 0] });
+  // Rubber hand grips.
+  for (const z of [-0.2, 0.2]) kit.mesh(g, new THREE.CylinderGeometry(0.045, 0.045, 0.14, 10), kit.toon(accent), [gripX, gripY, z], { rot: [Math.PI / 2, 0, 0], ink: 0.006 });
 
   // Arched striped canopy on four poles, scalloped valances front and back.
   for (const x of [-0.52, 0.52]) for (const z of [-0.3, 0.3]) kit.mesh(g, new THREE.CylinderGeometry(0.018, 0.018, 0.82, 8), cream, [x, 1.55, z], { ink: 0.005 });
@@ -1850,6 +2134,88 @@ function buildPalm(kit: Kit, parent: THREE.Object3D, pos: Vec3, height: number, 
   for (let k = 0; k < 3; k++) kit.mesh(crown, new THREE.SphereGeometry(0.09, 12, 10), kit.toon('#5a3a1e'), [Math.cos(k * 2.1) * 0.12, -0.12, Math.sin(k * 2.1) * 0.12], { ink: 0.006 });
   crown.userData.seed = seed;
   return crown;
+}
+
+/** Tourist card scale (bean-head chibi on a towel reads ~0.55 m seated, ~0.8 m standing). */
+const TOURIST_SCALE = 0.56;
+const CROWD_VARIANTS = 18;
+
+interface CrowdRig {
+  /** Billboards every card to the camera (with drone-view lean), breath and decision hops. */
+  update: (frame: number, camera: THREE.Vector3, place: (i: number, out: THREE.Vector3) => void, hop: (i: number) => number) => void;
+}
+
+function buildBeachCrowd(kit: Kit, parent: THREE.Object3D, tz: readonly number[]): CrowdRig {
+  const n = tz.length;
+  const geo = kit.track(createExtraCardGeometry());
+  const light = { side: -1 as const, rim: '#ffd36b', rimStrength: 0.7 };
+  const expressions: readonly Expression[] = ['warm', 'laugh', 'wonder', 'smirk', 'neutral', 'warm'];
+  const postureOf = (vi: number): ExtraPosture => (vi % 5 === 0 ? 'stand' : vi % 3 === 0 ? 'lounge' : 'sit');
+  const seated = Array.from({ length: CROWD_VARIANTS }, (_, vi) => vi).filter((vi) => postureOf(vi) !== 'stand');
+  // Neighbours never share a variant; the rows nearest the lens (z > 0) stay
+  // seated so they frame the carts instead of blocking them.
+  const variantOf: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const front = (tz[i] ?? 0) > 0;
+    const pool = front ? seated : Array.from({ length: CROWD_VARIANTS }, (_, vi) => vi);
+    let vi = pool[Math.floor(rnd(810, i) * pool.length)] ?? 1;
+    for (let tries = 0; tries < 4 && (vi === variantOf[i - 1] || vi === variantOf[i - 2]); tries++) vi = pool[(pool.indexOf(vi) + 1 + tries) % pool.length] ?? vi;
+    variantOf.push(vi);
+  }
+  const meshes: { mesh: THREE.InstancedMesh; members: number[] }[] = [];
+  for (let vi = 0; vi < CROWD_VARIANTS; vi++) {
+    const members = variantOf.map((x, i) => (x === vi ? i : -1)).filter((i) => i >= 0);
+    if (members.length === 0) continue;
+    const posture = postureOf(vi);
+    const armRoll = rnd(811, vi);
+    const armR: ArmPose = posture === 'stand' ? (armRoll < 0.4 ? 'wave' : armRoll < 0.7 ? 'hip' : 'side') : armRoll < 0.25 ? 'wave' : armRoll < 0.45 ? 'open' : 'side';
+    const armL: ArmPose = posture === 'stand' && armRoll > 0.7 ? 'hip' : 'side';
+    const spec: ExtraSpec = {
+      look: beachExtraLook(vi),
+      posture,
+      expression: expressions[vi % expressions.length] ?? 'warm',
+      armL,
+      armR,
+      look3: (rnd(812, vi) - 0.5) * 1.4,
+      // Mid-blink-free moments (blinks sit at k·100 + 12…74 + 9).
+      frame: 4 + vi * 100,
+      seed: 300 + vi * 17,
+    };
+    const tex = kit.canvas(EXTRA_CARD_PX.w, EXTRA_CARD_PX.h, (g) => paintExtra(g, spec, light));
+    const mat = kit.toon('#ffffff', tex, { alphaTest: 0.5, side: THREE.DoubleSide, emissive: new THREE.Color('#ffffff'), emissiveMap: tex, emissiveIntensity: 0.14 });
+    const mesh = new THREE.InstancedMesh(geo, mat, members.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    mesh.customDepthMaterial = kit.track(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.5 }));
+    mesh.frustumCulled = false;
+    mesh.name = `crowd-${vi}`;
+    parent.add(mesh);
+    meshes.push({ mesh, members });
+  }
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler(0, 0, 0, 'YXZ');
+  const p = new THREE.Vector3();
+  const s = new THREE.Vector3();
+  return {
+    update(frame, camera, place, hop) {
+      for (const { mesh, members } of meshes) {
+        members.forEach((i, k) => {
+          place(i, p);
+          const yaw = Math.atan2(camera.x - p.x, camera.z - p.z);
+          const pitch = billboardPitch(camera, p, TOURIST_SCALE);
+          // Tiny per-tourist sway so the crowd breathes.
+          e.set(-pitch, yaw, loopWave(frame, 7 + (i % 4), i) * 0.025);
+          q.setFromEuler(e);
+          const breath = 1 + loopWave(frame, 13, i * 0.7) * 0.012;
+          s.set(TOURIST_SCALE, TOURIST_SCALE * breath, TOURIST_SCALE);
+          p.y += hop(i) * 0.09;
+          mesh.setMatrixAt(k, m4.compose(p, q, s));
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    },
+  };
 }
 
 export function createBeachWorld(kit: Kit): WorldScene {
@@ -2041,8 +2407,9 @@ export function createBeachWorld(kit: Kit): WorldScene {
   boundary.renderOrder = 3;
 
   // Carts.
-  const blueCart = buildCart(kit, group, '#2563eb', '#f9a8d4', -1, 731);
-  const redCart = buildCart(kit, group, '#dc2626', '#fde68a', 1, 741);
+  // Handles face each vendor: blue pushes from the left (−x), red from the right (+x).
+  const blueCart = buildCart(kit, group, '#2563eb', '#f9a8d4', 1, 731);
+  const redCart = buildCart(kit, group, '#dc2626', '#fde68a', -1, 741);
 
   // 100 tourists on towels, each with a floating "buys from" pin.
   const N = TOURIST_X.length;
@@ -2055,23 +2422,18 @@ export function createBeachWorld(kit: Kit): WorldScene {
     tz.push(z + (rnd(802, i) - 0.5) * 0.25);
   }
   const towelM = new THREE.InstancedMesh(kit.track(new THREE.BoxGeometry(0.42, 0.02, 0.78)), kit.toon('#ffffff'), N);
-  const bodyM = new THREE.InstancedMesh(kit.track(new THREE.CapsuleGeometry(0.1, 0.2, 4, 10)), kit.toon('#ffffff'), N);
-  const headM = new THREE.InstancedMesh(kit.track(new THREE.SphereGeometry(0.105, 14, 10)), kit.toon('#ffffff'), N);
-  const hatM = new THREE.InstancedMesh(kit.track(new THREE.ConeGeometry(0.17, 0.09, 16)), kit.toon('#ffffff'), N);
   const pinM = new THREE.InstancedMesh(kit.track(new THREE.SphereGeometry(0.06, 12, 10)), kit.basic({ color: '#ffffff' }), N);
   const pinTipM = new THREE.InstancedMesh(kit.track(new THREE.ConeGeometry(0.04, 0.1, 10)), kit.basic({ color: '#ffffff' }), N);
   const umbN = 8;
   const umbTopM = new THREE.InstancedMesh(kit.track(new THREE.ConeGeometry(0.42, 0.2, 12)), kit.toon('#ffffff', kit.canvas(256, 64, stripedPaint('#ffffff', '#ffffff', 2, false, 1))), umbN);
   const umbPoleM = new THREE.InstancedMesh(kit.track(new THREE.CylinderGeometry(0.016, 0.016, 1.2, 6)), kit.toon('#f5f5f4'), umbN);
-  for (const m of [towelM, bodyM, headM, hatM, umbTopM, umbPoleM]) {
+  for (const m of [towelM, umbTopM, umbPoleM]) {
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
   }
   group.add(pinM, pinTipM);
   const towelCols = ['#f472b6', '#38bdf8', '#facc15', '#a3e635', '#fb923c', '#c084fc', '#f87171'];
-  const shirtCols = ['#ef4444', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6', '#fafafa', '#84cc16'];
-  const skinCols = ['#f3c6a5', '#e0a882', '#c98a63', '#a86d4a', '#f6d2b8'];
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
@@ -2084,17 +2446,13 @@ export function createBeachWorld(kit: Kit): WorldScene {
     q.setFromEuler(e.set(0, yaw, 0));
     towelM.setMatrixAt(i, m4.compose(v.set(x, 0.012, z), q, one));
     towelM.setColorAt(i, c.set(towelCols[i % towelCols.length] ?? '#fff'));
-    const lying = rnd(804, i) > 0.7;
-    q.setFromEuler(e.set(lying ? Math.PI / 2 : -0.15, yaw, 0));
-    bodyM.setMatrixAt(i, m4.compose(v.set(x, lying ? 0.13 : 0.22, z + (lying ? 0.05 : 0)), q, one));
-    bodyM.setColorAt(i, c.set(shirtCols[Math.floor(rnd(805, i) * shirtCols.length)] ?? '#fff'));
-    q.identity();
-    headM.setMatrixAt(i, m4.compose(v.set(x, lying ? 0.15 : 0.5, z + (lying ? -0.28 : 0.03)), q, one));
-    headM.setColorAt(i, c.set(skinCols[Math.floor(rnd(806, i) * skinCols.length)] ?? '#fff'));
-    const hat = rnd(807, i) > 0.55 && !lying;
-    hatM.setMatrixAt(i, m4.compose(v.set(x, hat ? 0.6 : -5, z + 0.03), q, one));
-    hatM.setColorAt(i, c.set(rnd(808, i) > 0.5 ? '#e9c77b' : '#fef3c7'));
   }
+
+  // Unified Bean-Head crowd: every tourist is a painted Persis bean-head card
+  // (same rig, ink, grain and SOLE line as the hero cast) — sunhats, caps,
+  // sunglasses, Hawaiian shirts, board shorts; sitting, lounging or standing.
+  const crowd = buildBeachCrowd(kit, group, tz);
+
   const umbCols = ['#ef4444', '#3b82f6', '#facc15', '#22c55e', '#f97316', '#a855f7'];
   for (let k = 0; k < umbN; k++) {
     const behind = tz.map((z, j) => (z < 0 ? j : -1)).filter((j) => j >= 0);
@@ -2106,7 +2464,7 @@ export function createBeachWorld(kit: Kit): WorldScene {
     umbTopM.setMatrixAt(k, m4.compose(v.set(x, 1.22, z), q, one));
     umbTopM.setColorAt(k, c.set(umbCols[k % umbCols.length] ?? '#fff'));
   }
-  for (const m of [towelM, bodyM, headM, hatM, umbTopM, umbPoleM]) {
+  for (const m of [towelM, umbTopM, umbPoleM]) {
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }
@@ -2247,6 +2605,21 @@ export function createBeachWorld(kit: Kit): WorldScene {
     if (pinTipM.instanceColor) pinTipM.instanceColor.needsUpdate = true;
     pinM.visible = share.visible * mapView > 0.001;
     pinTipM.visible = pinM.visible;
+
+    // Bean-head crowd: face the lens, lean back for the drone map, and give a
+    // little hop the moment each tourist switches vendor.
+    crowd.update(
+      frame,
+      camera.position,
+      (i, out) => out.set(TOURIST_X[i] ?? 0, 0.02, (tz[i] ?? 0) + 0.12),
+      (i) => {
+        const delay = 3 + Math.floor(rnd(809, i) * 9);
+        for (let d = 0; d < 8; d++) {
+          if (TOURIST_X[i]! < boundaryAt(frame - delay - d) !== TOURIST_X[i]! < boundaryAt(frame - delay - d - 1)) return Math.sin(((d + 1) / 9) * Math.PI);
+        }
+        return 0;
+      },
+    );
 
     for (const gl of gulls) {
       const u = loopSaw(frame, 2, gl.k * 0.27);
