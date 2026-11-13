@@ -330,6 +330,25 @@ interface Pose extends FacePreset {
 /** Breaths and weight shifts complete whole cycles per 60 s loop (≈ 0.22 Hz / 0.1 Hz). */
 const BREATH_CYCLES = 13;
 const WEIGHT_CYCLES = 6;
+/** Forward lean of the pushing profile (18°). */
+const PUSH_LEAN = (18 * Math.PI) / 180;
+/** Puzzled head tilt of the `ponder` pose (≈7°). */
+const PONDER_TILT = (7 * Math.PI) / 180;
+
+/** How much of `pose` a blended arm currently shows (0..1). */
+function poseWeight(b: Blend<ArmPose>, pose: ArmPose): number {
+  return (b.from === pose ? 1 - b.mix : 0) + (b.to === pose ? b.mix : 0);
+}
+
+/** 0..1 — both hands on the cart handle → side-on 3/4 pushing profile. */
+export function pushWeight(d: Pick<ToonDrive, 'armL' | 'armR'>): number {
+  return (poseWeight(d.armL, 'push') + poseWeight(d.armR, 'push')) / 2;
+}
+
+/** 0..1 — relaxed puzzled stance (hand by the chin, weight on one leg). */
+function ponderWeight(d: Pick<ToonDrive, 'armL' | 'armR'>): number {
+  return Math.max(poseWeight(d.armL, 'ponder'), poseWeight(d.armR, 'ponder'));
+}
 
 function poseFor(d: ToonDrive, seed: number): Pose {
   const a = PRESETS[d.expression.from];
@@ -339,7 +358,13 @@ function poseFor(d: ToonDrive, seed: number): Pose {
   const f = d.frame;
   const talking = d.viseme.open > 0.05 ? 1 : 0;
   const sway = loopWave(f, 7, seed) * 0.04 + loopWave(f, 19, seed * 2) * 0.015 * (1 + talking);
-  const turn = clamp01((d.look + 1) / 2) * 2 - 1;
+  const dir = d.walkDir < 0 ? -1 : 1;
+  const push = pushWeight(d);
+  const ponder = ponderWeight(d);
+  // Pushing: head and eyes locked forward along the walk direction.
+  const turnBase = clamp01((d.look + 1) / 2) * 2 - 1;
+  const turn = lerp(turnBase, dir * 1.35, push);
+  const ponderSide = poseWeight(d.armR, 'ponder') >= poseWeight(d.armL, 'ponder') ? 1 : -1;
   const bp = (2 * Math.PI * BREATH_CYCLES * f) / 1800 + seed;
   const inhale = (p: number): number => 0.5 - 0.5 * Math.cos(p + 0.35 * Math.sin(p));
   const breathOpen = inhale(bp);
@@ -357,21 +382,27 @@ function poseFor(d: ToonDrive, seed: number): Pose {
     browAsym: mk('browAsym'),
     smile: mk('smile'),
     pull: mk('pull'),
-    lookY: mk('lookY'),
+    lookY: lerp(mk('lookY'), 0.05, push),
     wide: mk('wide'),
     gape: mk('gape'),
     happy: mk('happy'),
     frame: f,
-    turn: turn * 0.55 + sway,
-    tilt: (turn * 0.55 + sway) * 0.07 + loopWave(f, 5, seed) * 0.025 - shiftRot * 0.6 + mk('browAsym') * 0.04,
-    lookX: Math.max(-1, Math.min(1, turn * 0.9 + saccade)),
+    turn: turn * 0.55 + sway * (1 - push),
+    tilt:
+      (turn * 0.55 + sway) * 0.07 * (1 - push) +
+      loopWave(f, 5, seed) * 0.025 -
+      shiftRot * 0.6 +
+      mk('browAsym') * 0.04 * (1 - ponder) +
+      ponder * ponderSide * (PONDER_TILT + loopWave(f, 4, seed) * 0.012),
+    lookX: lerp(Math.max(-1, Math.min(1, turn * 0.9 + saccade)), dir, push),
     blink: mk('happy') > 0.5 ? 0 : blinkAt(f, seed),
     viseme,
     breath: -(breathOpen - 0.5) * 6,
     breathOpen,
     breathHead: -(inhale(bp - 0.5) - 0.5) * 4,
-    shiftX: walking ? 0 : weight * 5,
-    shiftRot,
+    // Contrapposto: hips settle over the standing leg (opposite the chin hand).
+    shiftX: walking ? 0 : weight * 5 * (1 - ponder) - ponder * ponderSide * 12,
+    shiftRot: shiftRot * (1 - ponder) + ponder * ponderSide * 0.018,
     bow: nodTalk,
   };
 }
@@ -449,6 +480,11 @@ interface Frame {
   footN: readonly [number, number];
   walking: boolean;
   walkDir: number;
+  /** 0..1 pushing-profile weight. */
+  push: number;
+  /** 0..1 relaxed contrapposto weight and which leg (sign) is the relaxed one. */
+  relax: number;
+  relaxSide: number;
 }
 
 const STRIDE_AMP = 44;
@@ -475,23 +511,36 @@ function frameFor(pose: Pose, drive: ToonDrive): Frame {
   const walking = drive.walkPhase !== null;
   const phase = drive.walkPhase ?? 0;
   const dir = drive.walkDir < 0 ? -1 : 1;
-  const bob = walking ? Math.cos(phase * 2) * 3.5 : 0;
+  const push = pushWeight(drive);
+  const relax = walking ? 0 : ponderWeight(drive);
+  const relaxSide = poseWeight(drive.armR, 'ponder') >= poseWeight(drive.armL, 'ponder') ? 1 : -1;
+  // Pushers stride longer and sit a little lower into the push.
+  const bob = walking ? Math.cos(phase * 2) * (3.5 + push * 2) : 0;
+  const crouch = push * 10;
   const cyc = [0, 1].map((i) => (walking ? footCycle(phase + i * Math.PI) : { x: 0, lift: 0, pitch: 0 }));
   const at = (i: number, k: 'x' | 'lift' | 'pitch'): number => cyc[i]?.[k] ?? 0;
   const cx = HEAD_CX + pose.turn * 3;
+  // Standing push stance: the leg on the walk side leads, the other braces back.
+  const stance = (i: number): number => (walking ? 0 : push * ((SIGN[i] ?? 1) === dir ? 26 : -48) * dir);
+  // …with its heel peeled off the ground (and a relaxed contrapposto heel).
+  const braced = (i: number): number =>
+    walking ? 0 : push * ((SIGN[i] ?? 1) === dir ? 0 : 0.32) + relax * ((SIGN[i] ?? 1) === relaxSide ? 0.22 : 0);
   return {
     cx,
-    top: TORSO_TOP + bob + pose.breath * 0.5,
-    hipY: HIP_Y + bob,
+    top: TORSO_TOP + bob + pose.breath * 0.5 + crouch,
+    hipY: HIP_Y + bob + crouch,
     breathScale: 1 + pose.breathOpen * 0.02,
     headX: HEAD_CX + pose.turn * 9 + (walking ? dir * 4 : 0),
-    headY: HEAD_CY + bob + pose.breathHead * 0.6 + pose.bow * 10,
+    headY: HEAD_CY + bob + pose.breathHead * 0.6 + pose.bow * 10 + crouch,
     lift: [at(0, 'lift') * SWING_LIFT, at(1, 'lift') * SWING_LIFT],
-    stride: [at(0, 'x') * STRIDE_AMP * dir, at(1, 'x') * STRIDE_AMP * dir],
-    pitch: [at(0, 'pitch'), at(1, 'pitch')],
+    stride: [at(0, 'x') * STRIDE_AMP * dir + stance(0), at(1, 'x') * STRIDE_AMP * dir + stance(1)],
+    pitch: [at(0, 'pitch') - braced(0), at(1, 'pitch') - braced(1)],
     footN: [at(0, 'x'), at(1, 'x')],
     walking,
     walkDir: dir,
+    push,
+    relax,
+    relaxSide,
   };
 }
 
@@ -540,10 +589,12 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, dri
   const legs = SIGN.map((s, i) => {
     const lift = fr.lift[i] ?? 0;
     const pitch = fr.pitch[i] ?? 0;
+    // Relaxed (non-weight-bearing) leg tucks in toward the standing leg.
+    const loose = s === fr.relaxSide ? fr.relax : 0;
     const hip: Pt = [fr.cx + s * 34, fr.hipY];
-    const ankle: Pt = [fr.cx + s * 38 + (fr.stride[i] ?? 0), ANKLE_Y - lift - Math.max(0, -pitch) * 30];
-    let knee: Pt = [fr.cx + s * 37, lerp(fr.hipY, ANKLE_Y, 0.5) - lift * 0.5];
-    if (fr.walking) {
+    const ankle: Pt = [fr.cx + s * 38 + (fr.stride[i] ?? 0) - s * loose * 16, ANKLE_Y - lift - Math.max(0, -pitch) * 30];
+    let knee: Pt = [fr.cx + s * 37 - s * loose * 22, lerp(fr.hipY, ANKLE_Y, 0.5) - lift * 0.5 + loose * 4];
+    if (fr.walking || Math.abs(fr.stride[i] ?? 0) > 1) {
       // Two-bone IK, knee bends toward the walk direction.
       const half = ((ANKLE_Y - HIP_Y) / 2) * 1.004;
       const dx = ankle[0] - hip[0];
@@ -812,7 +863,9 @@ function drawTorso(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, dr
 // ── Arms, hands, props ──────────────────────────────────────────────────────
 
 function shoulderOf(s: number, fr: Frame): Pt {
-  return [fr.cx + s * 80 * fr.breathScale, fr.top + 30];
+  // Side-on pushing profile: the shoulders turn and narrow toward the handle.
+  const span = 80 * fr.breathScale * (1 - 0.55 * fr.push);
+  return [fr.cx + s * span + fr.walkDir * 10 * fr.push, fr.top + 30];
 }
 
 function wristTarget(pose: ArmPose, s: number, i: number, fr: Frame, frame: number, seed: number): Pt {
@@ -834,10 +887,19 @@ function wristTarget(pose: ArmPose, s: number, i: number, fr: Frame, frame: numb
       return [cx + s * (178 + Math.sin(frame * 0.42 + seed) * 24), top - 112 + Math.cos(frame * 0.42 + seed) * 8];
     case 'open':
       return [cx + s * 176, top + 138 + idle];
-    case 'push':
-      return [cx + s * 52, top + 172 + idle * 0.5];
+    case 'push': {
+      // Both hands reach forward (walk direction) to the cart's push bar at
+      // chest height; the far hand sits a touch higher on the bar.
+      const far = s === fr.walkDir;
+      const reach = lerp(52 * s, fr.walkDir * (far ? 168 : 190), fr.push);
+      const y = lerp(top + 172, top + (far ? 52 : 62), fr.push);
+      return [cx + reach, y + idle * 0.25];
+    }
     case 'think':
       return [fr.headX + s * 34, fr.headY + 104];
+    case 'ponder':
+      // Relaxed hand resting beside the jaw / temple, drifting slightly.
+      return [fr.headX + s * 104 + loopWave(frame, 3, seed) * 4, fr.headY + 50 + loopWave(frame, 5, seed + 1) * 5];
     case 'chalk':
       return [cx + s * 232, top - 64 + Math.sin(frame * 0.3) * 10];
     case 'bag': {
@@ -890,7 +952,9 @@ function armsFor(drive: ToonDrive, fr: Frame, seed: number): ArmSolve[] {
     const pose = blend.mix > 0.5 ? blend.to : blend.from;
     const shoulder = shoulderOf(s, fr);
     const { elbow, wrist } = solveArm(shoulder, target, s);
-    return { s, pose, shoulder, elbow, wrist, front: !RESTING_ARMS.includes(pose) };
+    // In the pushing profile the far arm passes behind the torso.
+    const farPush = pose === 'push' && fr.push > 0.5 && s === fr.walkDir;
+    return { s, pose, shoulder, elbow, wrist, front: !RESTING_ARMS.includes(pose) && !farPush };
   });
 }
 
@@ -971,7 +1035,8 @@ function drawHand(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmSolve)
 /** Plastic minimarket bag hanging from the hand (prop layer). */
 function drawBag(ctx: CanvasRenderingContext2D, arm: ArmSolve, frame: number): void {
   const [x, y] = arm.wrist;
-  const sway = Math.sin(frame * 0.12) * 0.06;
+  // Slow pendulum swing (loop-periodic) with a small secondary wobble.
+  const sway = loopWave(frame, 21, 0.6) * 0.09 + loopWave(frame, 53, 1.9) * 0.025;
   ctx.save();
   ctx.translate(x, y + 10);
   ctx.rotate(sway);
@@ -1487,20 +1552,50 @@ export function paintCharacter(ctx: CanvasRenderingContext2D, look: Look, drive:
     ctx.rotate(pose.shiftRot + (fr.walking ? fr.walkDir * 0.05 : 0));
     ctx.translate(-LW / 2, -SOLE);
     const arms = armsFor(drive, fr, seed);
-    for (const arm of arms) {
-      if (!arm.front) {
-        drawArm(ctx, look, arm, drive);
-        drawHand(ctx, look, arm);
+    if (fr.push > 0.01) {
+      // Pushing profile: legs stay planted, the upper body leans 18° into the
+      // handle, pivoting at the hips; torso narrows to a 3/4 side view.
+      drawLegs(ctx, look, fr, drive);
+      ctx.save();
+      ctx.translate(fr.cx, fr.hipY + 10);
+      ctx.rotate(fr.walkDir * PUSH_LEAN * fr.push);
+      ctx.translate(-fr.cx, -(fr.hipY + 10));
+      for (const arm of arms) {
+        if (!arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+        }
       }
-    }
-    drawLegs(ctx, look, fr, drive);
-    drawTorso(ctx, look, fr, drive, seed);
-    drawHead(ctx, look, pose, fr, drive);
-    for (const arm of arms) {
-      if (arm.front) {
-        drawArm(ctx, look, arm, drive);
-        drawHand(ctx, look, arm);
-        if (arm.pose === 'bag') drawBag(ctx, arm, drive.frame);
+      ctx.save();
+      ctx.translate(fr.cx, 0);
+      ctx.scale(1 - 0.2 * fr.push, 1);
+      ctx.translate(-fr.cx, 0);
+      drawTorso(ctx, look, fr, drive, seed);
+      ctx.restore();
+      drawHead(ctx, look, pose, fr, drive);
+      for (const arm of arms) {
+        if (arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+        }
+      }
+      ctx.restore();
+    } else {
+      for (const arm of arms) {
+        if (!arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+        }
+      }
+      drawLegs(ctx, look, fr, drive);
+      drawTorso(ctx, look, fr, drive, seed);
+      drawHead(ctx, look, pose, fr, drive);
+      for (const arm of arms) {
+        if (arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+          if (arm.pose === 'bag') drawBag(ctx, arm, drive.frame);
+        }
       }
     }
   }
@@ -1689,7 +1784,14 @@ export class ToonActor {
     }
     this.card.material.emissiveIntensity = u.glow;
     this.mesh.getWorldPosition(this.world);
-    this.card.rotation.y = Math.atan2(camera.x - this.world.x, camera.z - this.world.z) - this.mesh.rotation.y;
+    // Yaw-only billboard: the card ALWAYS stands perpendicular to the ground
+    // (no pitch / roll), so characters never lie back toward the sky.
+    this.card.rotation.set(0, Math.atan2(camera.x - this.world.x, camera.z - this.world.z) - this.mesh.rotation.y, 0);
+    // Soft oval drop shadow stretches along the stride / push stance.
+    const push = pushWeight(u);
+    const cat = this.look.kind === 'cat';
+    this.blob.scale.set((cat ? 0.5 : 0.78) * (1 + push * 0.45), 1, cat ? 0.32 : 0.42);
+    this.blob.position.x = (u.walkDir < 0 ? -1 : 1) * push * 0.12;
   }
 
   dispose(): void {

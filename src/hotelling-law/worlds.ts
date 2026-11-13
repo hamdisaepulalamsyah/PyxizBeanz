@@ -544,6 +544,46 @@ function buildStore(kit: Kit, parent: THREE.Object3D, b: Brand, streak: THREE.Te
     c.fill();
   });
   kit.mesh(interior, new THREE.PlaneGeometry(0.62, 0.93), kit.basic({ map: cashier, transparent: true, depthWrite: false }), [b.x < 0 ? 1.0 : -1.0, 1.05, -0.95], { ink: false });
+  // Front gondolas right behind the glass: crisp backlit silhouettes of shelf
+  // uprights, snack bags and bottles so the display reads through the window.
+  const gondola = kit.canvas(512, 384, (c, w, h) => {
+    c.clearRect(0, 0, w, h);
+    const ink = 'rgba(36, 22, 38, 0.78)';
+    c.fillStyle = ink;
+    for (const x of [6, w / 2 - 6, w - 18]) c.fillRect(x, 20, 12, h - 20);
+    const shelves = 4;
+    for (let r = 0; r < shelves; r++) {
+      const y = 70 + r * ((h - 90) / (shelves - 1));
+      c.fillStyle = ink;
+      c.fillRect(0, y, w, 9);
+      let x = 22;
+      let k = 0;
+      while (x < w - 30) {
+        const kind = rnd(b.seed + 300 + r, k);
+        const bw = kind < 0.4 ? 22 : 34;
+        const bh = kind < 0.4 ? 44 + rnd(b.seed + 310, k) * 20 : 30 + rnd(b.seed + 320, k) * 26;
+        c.fillStyle = `rgba(36, 22, 38, ${0.55 + rnd(b.seed + 330, k) * 0.25})`;
+        c.beginPath();
+        if (kind < 0.4) {
+          // Bottle: body + neck + cap.
+          c.roundRect(x, y - bh, bw, bh, 6);
+          c.rect(x + bw / 2 - 4, y - bh - 12, 8, 12);
+        } else {
+          // Snack pouch with crimped top.
+          c.moveTo(x, y);
+          c.lineTo(x + 3, y - bh);
+          c.lineTo(x + bw - 3, y - bh);
+          c.lineTo(x + bw, y);
+        }
+        c.fill();
+        x += bw + 4;
+        k++;
+      }
+    }
+  });
+  for (const gx of [-0.7, 0.62]) {
+    kit.mesh(interior, new THREE.PlaneGeometry(1.15, 1.6), kit.basic({ map: gondola, transparent: true, depthWrite: false, fog: false }), [gx, 0.92, -0.42], { ink: false });
+  }
 
   // Glass + mullions + door.
   const glassMat = kit.basic({ color: '#cfe3ff', transparent: true, opacity: 0.2, depthWrite: false });
@@ -656,6 +696,72 @@ function buildStore(kit: Kit, parent: THREE.Object3D, b: Brand, streak: THREE.Te
   kit.box(g, [W + 0.3, 0.1, 0.42], clad, [0, GROUND_FLOOR + 0.02, 0.12], { shadow: true });
   kit.box(g, [W + 0.2, 0.06, 0.34], clad, [0, GROUND_FLOOR - 0.06, 0.1]);
   for (let k = 0; k < 16; k++) kit.box(g, [0.07, 0.06, 0.07], clad, [-W / 2 + 0.1 + (k * (W - 0.2)) / 15, GROUND_FLOOR - 0.13, 0.22], { ink: 0.006 });
+
+  // Glazed ceramic terrace in front of the shop (40 cm tiles, grout lines, sheen).
+  const tiles = kit.canvas(512, 512, (c, w, h) => {
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const t = rnd(b.seed + 400, i * n + j);
+        c.fillStyle = shadeHex('#e9e2d6', -0.04 - t * 0.06);
+        c.fillRect((i / n) * w, (j / n) * h, w / n, h / n);
+        const r = c.createLinearGradient((i / n) * w, (j / n) * h, ((i + 1) / n) * w, ((j + 1) / n) * h);
+        r.addColorStop(0, 'rgba(255,255,255,0.22)');
+        r.addColorStop(0.5, 'rgba(255,255,255,0)');
+        c.fillStyle = r;
+        c.fillRect((i / n) * w, (j / n) * h, w / n, h / n);
+      }
+    }
+    c.strokeStyle = 'rgba(70, 60, 70, 0.75)';
+    c.lineWidth = 4;
+    for (let i = 0; i <= n; i++) {
+      c.beginPath();
+      c.moveTo((i / n) * w, 0);
+      c.lineTo((i / n) * w, h);
+      c.moveTo(0, (i / n) * h);
+      c.lineTo(w, (i / n) * h);
+      c.stroke();
+    }
+  }, { repeat: [1, 0.6] });
+  const tileMat = kit.track(new THREE.MeshStandardMaterial({ map: tiles, color: '#d9d2e6', roughness: 0.22, metalness: 0.1 }));
+  kit.mesh(g, new THREE.PlaneGeometry(W + 0.2, 1.95), tileMat, [0, 0.004, 1.12], { ink: false, rot: [-Math.PI / 2, 0, 0] });
+
+  // Tall illuminated pylon sign at the kerb, on the shop's outer side.
+  const outer = b.x < 0 ? -1 : 1;
+  const pylon = new THREE.Group();
+  pylon.position.set(outer * (W / 2 - 0.45), 0, 1.95);
+  g.add(pylon);
+  const steel = kit.toon('#3a3743');
+  kit.box(pylon, [0.14, 4.0, 0.14], steel, [0, 2.0, 0], { shadow: true });
+  kit.box(pylon, [0.4, 0.12, 0.4], granite, [0, 0.06, 0], { shadow: true });
+  const pylonFace = kit.canvas(384, 512, (c, w, h) => {
+    vGradient(c, w, h, [
+      [0, shadeHex(b.primary, 0.15)],
+      [1, shadeHex(b.primary, -0.2)],
+    ]);
+    c.fillStyle = b.stripeA;
+    c.fillRect(0, h * 0.62, w, h * 0.08);
+    c.fillStyle = b.stripeB;
+    c.fillRect(0, h * 0.7, w, h * 0.08);
+    c.font = `italic 900 ${Math.round((w * 1.55) / b.name.length)}px ${SIGN_FONT}`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.lineJoin = 'round';
+    c.strokeStyle = shadeHex(b.primary, -0.55);
+    c.lineWidth = 10;
+    c.strokeText(b.name, w / 2, h * 0.36);
+    c.fillStyle = '#ffffff';
+    c.fillText(b.name, w / 2, h * 0.36);
+    c.font = `900 44px ${SIGN_FONT}`;
+    c.fillStyle = '#ffffff';
+    c.fillText('24 JAM', w / 2, h * 0.88);
+  });
+  kit.box(pylon, [0.95, 1.25, 0.2], kit.toon(shadeHex(b.primary, -0.45)), [0, 4.45, 0], { shadow: true });
+  const pylonMat = kit.basic({ map: pylonFace, color: '#ffffff' });
+  for (const side of [1, -1]) kit.mesh(pylon, new THREE.PlaneGeometry(0.87, 1.16), pylonMat, [0, 4.45, side * 0.105], { ink: false, rot: [0, side < 0 ? Math.PI : 0, 0] });
+  const pylonNeon = kit.basic({ color: b.neon });
+  for (const y of [3.81, 5.09]) kit.box(pylon, [0.99, 0.025, 0.24], pylonNeon, [0, y, 0], { ink: false });
+  kit.glow(pylon, b.neon, 2.6, [0, 4.45, 0.3], 0.35);
 
   // Light: warm interior spill + coloured sign wash.
   const interiorLight = new THREE.PointLight('#ffd7a1', 9, 9, 1.4);
@@ -1753,11 +1859,23 @@ function buildCart(kit: Kit, parent: THREE.Object3D, color: string, accent: stri
     wheels.push(w);
   }
   kit.mesh(g, new THREE.CylinderGeometry(0.025, 0.025, 0.9, 8), iron, [handleSide * -0.22, WHEEL_R, 0], { rot: [Math.PI / 2, 0, 0], ink: false });
-  // Stand leg on the far end, push handle on the vendor's end.
+  // Wheels lead, stand legs sit under the push bar on the vendor's end
+  // (handleSide). The bar is at pushing-hand height (~0.7 m) for the profile pose.
   kit.box(g, [0.05, 0.4, 0.05], iron, [handleSide * 0.48, 0.2, 0.22]);
   kit.box(g, [0.05, 0.4, 0.05], iron, [handleSide * 0.48, 0.2, -0.22]);
-  for (const z of [-0.26, 0.26]) kit.box(g, [0.42, 0.04, 0.04], iron, [handleSide * -0.75, 0.98, z], { rot: [0, 0, handleSide * 0.35] });
-  kit.mesh(g, new THREE.CylinderGeometry(0.035, 0.035, 0.6, 10), kit.toon('#1c1917'), [handleSide * -0.94, 1.06, 0], { rot: [Math.PI / 2, 0, 0] });
+  for (const z of [-0.26, 0.26]) kit.box(g, [0.4, 0.035, 0.035], iron, [handleSide * 0.75, 0.74, z], { rot: [0, 0, handleSide * 0.12] });
+  kit.mesh(g, new THREE.CylinderGeometry(0.035, 0.035, 0.62, 10), kit.toon('#1c1917'), [handleSide * 0.93, 0.72, 0], { rot: [Math.PI / 2, 0, 0] });
+  // Soft oval drop shadow so the cart sits heavy on the sand.
+  const shadowTex = kit.canvas(128, 128, (c, w, h) => {
+    const r = c.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    r.addColorStop(0, 'rgba(40, 20, 30, 0.62)');
+    r.addColorStop(0.6, 'rgba(40, 20, 30, 0.28)');
+    r.addColorStop(1, 'rgba(40, 20, 30, 0)');
+    c.fillStyle = r;
+    c.fillRect(0, 0, w, h);
+  });
+  const drop = kit.mesh(g, new THREE.PlaneGeometry(2.3, 1.25), kit.basic({ map: shadowTex, transparent: true, depthWrite: false }), [handleSide * 0.12, 0.014, 0.02], { ink: false, rot: [-Math.PI / 2, 0, 0], receive: false });
+  drop.renderOrder = 1;
 
   // Arched striped canopy on four poles, scalloped valances front and back.
   for (const x of [-0.52, 0.52]) for (const z of [-0.3, 0.3]) kit.mesh(g, new THREE.CylinderGeometry(0.018, 0.018, 0.82, 8), cream, [x, 1.55, z], { ink: 0.005 });
@@ -1850,6 +1968,360 @@ function buildPalm(kit: Kit, parent: THREE.Object3D, pos: Vec3, height: number, 
   for (let k = 0; k < 3; k++) kit.mesh(crown, new THREE.SphereGeometry(0.09, 12, 10), kit.toon('#5a3a1e'), [Math.cos(k * 2.1) * 0.12, -0.12, Math.sin(k * 2.1) * 0.12], { ink: 0.006 });
   crown.userData.seed = seed;
   return crown;
+}
+
+// ── Beach crowd ─────────────────────────────────────────────────────────────
+
+type TouristKind = 'sun' | 'wade' | 'pair' | 'stand';
+
+interface Tourist {
+  /** Visual position (pair partners spread a little around their market x). */
+  x: number;
+  z: number;
+  kind: TouristKind;
+  /** Body yaw (0 faces the camera side, +z). */
+  yaw: number;
+  /** Pair partner index, −1 when alone. */
+  partner: number;
+  /** Pairs: both members sit on one shared mat. */
+  seated: boolean;
+  seed: number;
+  hat: boolean;
+  shades: boolean;
+  floral: boolean;
+  coconut: boolean;
+  /** Wading pose: arms up cheering vs. splashing forward. */
+  cheer: boolean;
+  height: number;
+  skin: string;
+  hair: string;
+  shirt: string;
+  trunks: string;
+  mat: string;
+}
+
+const SKIN_TONES = ['#f6d2b8', '#f3c6a5', '#e0a882', '#c98a63', '#a86d4a', '#8a5638'];
+const HAIR_TONES = ['#2a1b17', '#4a2c1a', '#1c1412', '#8a5a2b', '#d9b26b', '#5b3a24'];
+const SHIRT_TONES = ['#ef4444', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6', '#fafafa', '#84cc16', '#0ea5e9', '#f97316'];
+const TRUNK_TONES = ['#06b6d4', '#f43f5e', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#0ea5e9', '#facc15'];
+const MAT_TONES = ['#f472b6', '#38bdf8', '#facc15', '#a3e635', '#fb923c', '#c084fc', '#f87171', '#2dd4bf'];
+
+const pick = <T,>(list: readonly T[], seed: number, i: number): T => list[Math.floor(rnd(seed, i) * list.length) % list.length] as T;
+
+/** Deterministic crowd layout: activity mix, spacing, wardrobe and props. */
+function buildTourists(): Tourist[] {
+  const out: Tourist[] = [];
+  const landRows = [-1.55, -1.1, 1.2, 1.6, 2.0];
+  for (let i = 0; i < TOURIST_X.length; i++) {
+    const mx = TOURIST_X[i] ?? 0;
+    const prev = out[i - 1];
+    const r = rnd(801, i);
+    let kind: TouristKind;
+    let partner = -1;
+    if (prev && prev.kind === 'pair' && prev.partner === i) {
+      kind = 'pair';
+      partner = i - 1;
+    } else if (r < 0.2) kind = 'wade';
+    else if (r < 0.47) kind = 'sun';
+    else if (r < 0.66 && i < TOURIST_X.length - 1) {
+      kind = 'pair';
+      partner = i + 1;
+    } else kind = 'stand';
+
+    let z: number;
+    if (kind === 'wade') z = SHORE_Z + 0.06 - rnd(802, i) * 0.42;
+    else if (kind === 'pair' && partner < i) z = (prev?.z ?? 1.45) + 0.03;
+    else z = (landRows[Math.floor(rnd(803, i) * landRows.length)] ?? 1.45) + (rnd(804, i) - 0.5) * 0.22;
+    // Keep the intro hero tourist (x −2.75, z 1.55) and the centre pole clear.
+    if (kind !== 'wade' && Math.abs(mx + 2.75) < 0.55 && z > 0) z = -1.5;
+    if (kind !== 'wade' && Math.abs(mx) < 0.3 && Math.abs(z + 0.85) < 0.35) z = -1.5;
+
+    let x = mx;
+    if (kind === 'pair') x += partner > i ? -0.13 : 0.13;
+    const seated = kind === 'sun' || (kind === 'pair' && rnd(820, Math.min(i, partner)) < 0.5);
+    let yaw: number;
+    if (kind === 'pair') yaw = (partner > i ? 1 : -1) * (0.95 + rnd(821, i) * 0.25);
+    else if (kind === 'wade') yaw = rnd(822, i) < 0.5 ? Math.PI + (rnd(823, i) - 0.5) * 1.2 : (rnd(823, i) - 0.5) * 1.4;
+    else yaw = (rnd(824, i) - 0.5) * (kind === 'sun' ? 0.7 : 1.3);
+
+    const stand = kind === 'stand';
+    out.push({
+      x,
+      z,
+      kind,
+      yaw,
+      partner,
+      seated,
+      seed: i * 7.31 + 3,
+      hat: rnd(830, i) < (stand ? 0.6 : 0.3),
+      shades: rnd(831, i) < (stand || kind === 'sun' ? 0.55 : 0.25),
+      floral: rnd(832, i) < (stand ? 0.7 : 0.35),
+      coconut: stand && rnd(833, i) < 0.4,
+      cheer: rnd(834, i) < 0.5,
+      height: 0.8 + rnd(835, i) * 0.14,
+      skin: pick(SKIN_TONES, 836, i),
+      hair: pick(HAIR_TONES, 837, i),
+      shirt: pick(SHIRT_TONES, 838, i),
+      trunks: pick(TRUNK_TONES, 839, i),
+      mat: pick(MAT_TONES, 840, kind === 'pair' ? Math.min(i, partner) : i),
+    });
+  }
+  return out;
+}
+
+/**
+ * Instanced bean-figure crowd. Returns a per-frame animator: subtle breathing,
+ * weight shifts, wading hops with foam rings, chatting pairs that look at each
+ * other, and heads that follow an ice-cream cart while it rolls past.
+ */
+function buildCrowd(kit: Kit, parent: THREE.Object3D, tourists: readonly Tourist[]): (frame: number) => void {
+  const n = tourists.length;
+  const inst = (geo: THREE.BufferGeometry, mat: THREE.Material, count: number, shadow = true): THREE.InstancedMesh => {
+    const m = new THREE.InstancedMesh(kit.track(geo), mat, count);
+    m.castShadow = shadow;
+    m.receiveShadow = true;
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    parent.add(m);
+    return m;
+  };
+  const floralTex = kit.canvas(256, 256, (g, w, h) => {
+    g.fillStyle = '#d4d4d4';
+    g.fillRect(0, 0, w, h);
+    for (let k = 0; k < 26; k++) {
+      const x = rnd(851, k) * w;
+      const y = rnd(852, k) * h;
+      const r = 9 + rnd(853, k) * 9;
+      g.fillStyle = '#9be7a8';
+      g.beginPath();
+      g.ellipse(x + r, y + r * 0.6, r * 0.9, r * 0.35, 0.6, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#ffffff';
+      for (let p = 0; p < 5; p++) {
+        const a = (p / 5) * Math.PI * 2;
+        g.beginPath();
+        g.arc(x + Math.cos(a) * r * 0.6, y + Math.sin(a) * r * 0.6, r * 0.5, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = '#ffe066';
+      g.beginPath();
+      g.arc(x, y, r * 0.32, 0, Math.PI * 2);
+      g.fill();
+    }
+  });
+  const matTex = kit.canvas(128, 256, stripedPaint('#ffffff', '#b9b9b9', 9, false, 861));
+  const shadowTex = kit.canvas(128, 128, (g, w, h) => {
+    const r = g.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    r.addColorStop(0, 'rgba(40, 20, 30, 0.55)');
+    r.addColorStop(0.6, 'rgba(40, 20, 30, 0.22)');
+    r.addColorStop(1, 'rgba(40, 20, 30, 0)');
+    g.fillStyle = r;
+    g.fillRect(0, 0, w, h);
+  });
+  const blobGeo = new THREE.PlaneGeometry(1, 1);
+  blobGeo.rotateX(-Math.PI / 2);
+  const ringGeo = new THREE.RingGeometry(0.15, 0.2, 28);
+  ringGeo.rotateX(-Math.PI / 2);
+
+  const matM = inst(new THREE.BoxGeometry(0.5, 0.014, 0.9), kit.toon('#ffffff', matTex), n);
+  const blobM = inst(blobGeo, kit.basic({ map: shadowTex, transparent: true, depthWrite: false }), n, false);
+  blobM.renderOrder = 1;
+  const ringM = inst(ringGeo, kit.basic({ color: '#ffffff', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }), n, false);
+  const legM = inst(new THREE.CapsuleGeometry(0.038, 0.2, 4, 8), kit.toon('#ffffff'), n * 2);
+  const hipM = inst(new THREE.CylinderGeometry(0.098, 0.092, 0.13, 14), kit.toon('#ffffff'), n);
+  const torsoPlainM = inst(new THREE.CapsuleGeometry(0.095, 0.16, 4, 12), kit.toon('#ffffff'), n);
+  const torsoFloralM = inst(new THREE.CapsuleGeometry(0.097, 0.16, 4, 12), kit.toon('#ffffff', floralTex), n);
+  const armM = inst(new THREE.CapsuleGeometry(0.03, 0.17, 4, 8), kit.toon('#ffffff'), n * 2);
+  const headM = inst(new THREE.SphereGeometry(0.1, 16, 12), kit.toon('#ffffff'), n);
+  const hairM = inst(new THREE.SphereGeometry(0.104, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.42), kit.toon('#ffffff'), n);
+  const brimM = inst(new THREE.CylinderGeometry(0.2, 0.2, 0.014, 20), kit.toon('#e9c77b'), n);
+  const crownM = inst(new THREE.CylinderGeometry(0.075, 0.095, 0.08, 16), kit.toon('#e9c77b'), n);
+  const bandM = inst(new THREE.CylinderGeometry(0.097, 0.097, 0.018, 16), kit.toon('#ffffff'), n, false);
+  const shadesM = inst(new THREE.BoxGeometry(0.16, 0.036, 0.03), kit.toon('#141018'), n, false);
+  const coconutM = inst(new THREE.SphereGeometry(0.068, 14, 10), kit.toon('#4f8a2b'), n);
+  const strawM = inst(new THREE.CylinderGeometry(0.006, 0.006, 0.12, 6), kit.toon('#f472b6'), n, false);
+
+  const col = new THREE.Color();
+  tourists.forEach((t, i) => {
+    matM.setColorAt(i, col.set(t.mat));
+    for (const k of [0, 1]) {
+      legM.setColorAt(i * 2 + k, col.set(t.skin));
+      armM.setColorAt(i * 2 + k, col.set(t.skin));
+    }
+    hipM.setColorAt(i, col.set(t.trunks));
+    torsoPlainM.setColorAt(i, col.set(t.shirt));
+    torsoFloralM.setColorAt(i, col.set(t.shirt));
+    headM.setColorAt(i, col.set(t.skin));
+    hairM.setColorAt(i, col.set(t.hair));
+    bandM.setColorAt(i, col.set(t.trunks));
+    ringM.setColorAt(i, col.set('#ffffff'));
+  });
+
+  const HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
+  const root = new THREE.Matrix4();
+  const spine = new THREE.Matrix4();
+  const head = new THREE.Matrix4();
+  const tmp = new THREE.Matrix4();
+  const out = new THREE.Matrix4();
+  const e = new THREE.Euler();
+  const q = new THREE.Quaternion();
+  const p = new THREE.Vector3();
+  const s = new THREE.Vector3();
+  const local = (x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx): THREE.Matrix4 =>
+    tmp.compose(p.set(x, y, z), q.setFromEuler(e.set(rx, ry, rz)), s.set(sx, sy, sz));
+  const put = (m: THREE.InstancedMesh, idx: number, parentM: THREE.Matrix4, l: THREE.Matrix4): void => {
+    m.setMatrixAt(idx, out.multiplyMatrices(parentM, l));
+  };
+  const downArm = new THREE.Matrix4().makeTranslation(0, -0.115, 0);
+  const downLeg = new THREE.Matrix4().makeTranslation(0, -0.138, 0);
+  const hand = new THREE.Matrix4().makeTranslation(0, -0.25, 0.02);
+  const limb = (m: THREE.InstancedMesh, idx: number, parentM: THREE.Matrix4, px: number, py: number, pz: number, rx: number, rz: number, down: THREE.Matrix4): void => {
+    m.setMatrixAt(idx, out.multiplyMatrices(parentM, local(px, py, pz, rx, 0, rz)).multiply(down));
+  };
+  const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+  const all = [matM, blobM, ringM, legM, hipM, torsoPlainM, torsoFloralM, armM, headM, hairM, brimM, crownM, bandM, shadesM, coconutM, strawM];
+
+  return (frame: number): void => {
+    // Which cart is rolling right now (ice-cream bell passing by)?
+    const now = cartsAt(frame);
+    const before = cartsAt(frame - 8);
+    const rolling = [
+      { x: now.blue, k: smoothstep(0.01, 0.06, Math.abs(now.blue - before.blue)) },
+      { x: now.red, k: smoothstep(0.01, 0.06, Math.abs(now.red - before.red)) },
+    ];
+
+    tourists.forEach((t, i) => {
+      const f = frame;
+      const breath = loopWave(f, 13 + (i % 5), t.seed);
+      const sway = loopWave(f, 5 + (i % 3), t.seed * 1.3);
+      const sc = t.height;
+
+      // Head attention: idle glances → partner chat → passing ice-cream cart.
+      let headYaw = loopWave(f, 3 + (i % 4), t.seed) * 0.35;
+      let nod = loopWave(f, 9 + (i % 4), t.seed * 0.7) * 0.05;
+      let gesture = 0;
+      if (t.kind === 'pair') {
+        const talkerFirst = Math.floor((f + t.seed * 13) / 52) % 2 === 0;
+        const talking = (t.partner > i) === talkerFirst;
+        headYaw = 0.3 + loopWave(f, 7, t.seed) * 0.12;
+        nod = talking ? Math.sin(f * 0.45 + t.seed) * 0.08 : loopWave(f, 17, t.seed) * 0.1;
+        gesture = talking ? 1 : 0;
+      }
+      let cartPull = 0;
+      let cartYaw = 0;
+      for (const c of rolling) {
+        const w = c.k * (1 - smoothstep(0.9, 3.2, Math.abs(c.x - t.x)));
+        if (w > cartPull) {
+          cartPull = w;
+          cartYaw = wrap(Math.atan2(c.x - t.x, CART_Z - t.z) - t.yaw);
+        }
+      }
+      const bodyTurn = t.kind === 'stand' ? Math.max(-0.5, Math.min(0.5, cartYaw * 0.3)) * cartPull : 0;
+      headYaw = lerp(headYaw, Math.max(-1.35, Math.min(1.35, cartYaw - bodyTurn)), cartPull);
+
+      const wading = t.kind === 'wade';
+      const hop = wading ? Math.max(0, Math.sin(f * 0.21 + t.seed)) * 0.035 : 0;
+      root.compose(p.set(t.x, (wading ? -0.035 : 0) + hop, t.z), q.setFromEuler(e.set(0, t.yaw + bodyTurn, 0)), s.set(sc, sc, sc));
+
+      const seated = t.seated;
+      // Mat (sunbathers and seated pairs) + soft oval drop shadow.
+      if (seated && (t.kind === 'sun' || t.partner > i)) {
+        const off = t.kind === 'pair' ? 0.14 : 0;
+        matM.setMatrixAt(i, out.compose(p.set(t.x + off, 0.008, t.z), q.setFromEuler(e.set(0, t.kind === 'pair' ? 0 : t.yaw * 0.6, 0)), s.set(t.kind === 'pair' ? 1.5 : 1, 1, 1)));
+      } else matM.setMatrixAt(i, HIDE);
+      if (wading) blobM.setMatrixAt(i, HIDE);
+      else blobM.setMatrixAt(i, out.compose(p.set(t.x, 0.016, t.z + (seated ? 0.06 : 0)), q.identity(), s.set(seated ? 0.62 : 0.46, 1, seated ? 0.78 : 0.3)));
+      // Foam rings around waders' ankles (additive, fade as they spread).
+      if (wading) {
+        const u = loopSaw(f, 36 + (i % 5), t.seed * 0.1);
+        const r = 0.7 + u * 1.5;
+        ringM.setMatrixAt(i, out.compose(p.set(t.x, 0.01, t.z), q.identity(), s.set(r, 1, r)));
+        ringM.setColorAt(i, col.setScalar(0.85 * (1 - u)));
+      } else ringM.setMatrixAt(i, HIDE);
+
+      const hipY = seated ? 0.07 : 0.3;
+      const hipZ = seated ? -0.12 : 0;
+      const lean = seated ? -0.38 + breath * 0.02 : -0.04 + sway * 0.02;
+      const roll = seated ? 0 : sway * 0.035;
+
+      // Legs.
+      for (const k of [0, 1] as const) {
+        const side = k === 0 ? -1 : 1;
+        if (seated) {
+          const bend = -Math.PI / 2 + 0.32 + (k === 0 ? 0.25 : 0) + loopWave(f, 4, t.seed + k) * 0.04;
+          limb(legM, i * 2 + k, root, side * 0.055, hipY, hipZ, bend, side * 0.08, downLeg);
+        } else {
+          const kick = wading && !t.cheer ? Math.sin(f * 0.21 + t.seed + k * Math.PI) * 0.25 : 0;
+          // Weight shift: one leg straight, the other relaxed.
+          const relax = k === (i % 2) ? 0.06 : -0.02;
+          limb(legM, i * 2 + k, root, side * 0.055, hipY, 0, kick, side * relax + roll * 0.5, downLeg);
+        }
+      }
+      put(hipM, i, root, local(0, hipY + 0.01, hipZ, seated ? -0.2 : 0));
+
+      // Spine (torso pivots at the hips), with a breathing chest.
+      spine.multiplyMatrices(root, local(0, hipY, hipZ, lean, 0, roll));
+      const chest = 1 + (breath * 0.5 + 0.5) * 0.035;
+      const torsoL = local(0, 0.17, 0, 0, 0, 0, chest, 1 + breath * 0.012, chest);
+      put(t.floral ? torsoFloralM : torsoPlainM, i, spine, torsoL);
+      (t.floral ? torsoPlainM : torsoFloralM).setMatrixAt(i, HIDE);
+
+      // Arms.
+      for (const k of [0, 1] as const) {
+        const side = k === 0 ? -1 : 1;
+        let rx = 0.05;
+        let rz = side * 0.14;
+        if (seated && t.kind === 'sun') {
+          rx = 0.95;
+          rz = side * 0.35;
+        } else if (wading && t.cheer) {
+          rx = -0.2;
+          rz = side * (2.45 + loopWave(f, 37, t.seed + k) * 0.3);
+        } else if (wading) {
+          rx = -0.9 + Math.sin(f * 0.3 + t.seed + k * 0.8) * 0.55;
+          rz = side * 0.3;
+        } else if (gesture && k === (i % 2)) {
+          rx = -0.95 + Math.sin(f * 0.33 + t.seed) * 0.3;
+          rz = side * 0.25;
+        } else if (t.coconut && k === 1) {
+          rx = -1.35;
+          rz = 0.35;
+        } else {
+          rx += loopWave(f, 11, t.seed + k) * 0.05;
+        }
+        limb(armM, i * 2 + k, spine, side * 0.125, 0.3, 0, rx, rz, downArm);
+        if (t.coconut && k === 1) {
+          const handM = out.multiplyMatrices(spine, local(side * 0.125, 0.3, 0, rx, 0, rz)).multiply(hand);
+          head.copy(handM);
+          coconutM.setMatrixAt(i, handM);
+          strawM.setMatrixAt(i, out.copy(head).multiply(local(0.02, 0.0, 0.07, -1.2, 0, 0.2)));
+        }
+      }
+      if (!t.coconut) {
+        coconutM.setMatrixAt(i, HIDE);
+        strawM.setMatrixAt(i, HIDE);
+      }
+
+      // Head: stays upright-ish, turns toward partner / passing cart.
+      head.multiplyMatrices(spine, local(0, 0.45, 0, -lean * 0.8 + nod, headYaw, -roll * 0.6));
+      put(headM, i, head, local(0, 0, 0));
+      put(hairM, i, head, local(0, 0.012, -0.012, -0.45));
+      if (t.hat) {
+        put(brimM, i, head, local(0, 0.07, -0.005, -0.08));
+        put(crownM, i, head, local(0, 0.115, -0.01, -0.08));
+        put(bandM, i, head, local(0, 0.095, -0.01, -0.08));
+      } else {
+        brimM.setMatrixAt(i, HIDE);
+        crownM.setMatrixAt(i, HIDE);
+        bandM.setMatrixAt(i, HIDE);
+      }
+      if (t.shades) put(shadesM, i, head, local(0, 0.012, 0.09));
+      else shadesM.setMatrixAt(i, HIDE);
+    });
+    for (const m of all) {
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    }
+  };
 }
 
 export function createBeachWorld(kit: Kit): WorldScene {
@@ -2044,69 +2516,42 @@ export function createBeachWorld(kit: Kit): WorldScene {
   const blueCart = buildCart(kit, group, '#2563eb', '#f9a8d4', -1, 731);
   const redCart = buildCart(kit, group, '#dc2626', '#fde68a', 1, 741);
 
-  // 100 tourists on towels, each with a floating "buys from" pin.
+  // 100 tourists — seeded, natural variety in four activities (sunbathing on
+  // striped mats, wading in the foam, chatting pairs, standing with props),
+  // each with a floating "buys from" pin for the drone map.
   const N = TOURIST_X.length;
-  const tz: number[] = [];
-  const rows = [-1.8, -1.35, -0.9, 1.05, 1.45, 1.85];
-  for (let i = 0; i < N; i++) {
-    let z = rows[Math.floor(rnd(801, i) * rows.length)] ?? 2;
-    const x = TOURIST_X[i] ?? 0;
-    if (Math.abs(x + 2.75) < 0.55 && z > 0) z = -1.35;
-    tz.push(z + (rnd(802, i) - 0.5) * 0.25);
-  }
-  const towelM = new THREE.InstancedMesh(kit.track(new THREE.BoxGeometry(0.42, 0.02, 0.78)), kit.toon('#ffffff'), N);
-  const bodyM = new THREE.InstancedMesh(kit.track(new THREE.CapsuleGeometry(0.1, 0.2, 4, 10)), kit.toon('#ffffff'), N);
-  const headM = new THREE.InstancedMesh(kit.track(new THREE.SphereGeometry(0.105, 14, 10)), kit.toon('#ffffff'), N);
-  const hatM = new THREE.InstancedMesh(kit.track(new THREE.ConeGeometry(0.17, 0.09, 16)), kit.toon('#ffffff'), N);
+  const tourists = buildTourists();
+  const tz = tourists.map((t) => t.z);
+  const vx = tourists.map((t) => t.x);
+  const crowd = buildCrowd(kit, group, tourists);
   const pinM = new THREE.InstancedMesh(kit.track(new THREE.SphereGeometry(0.06, 12, 10)), kit.basic({ color: '#ffffff' }), N);
   const pinTipM = new THREE.InstancedMesh(kit.track(new THREE.ConeGeometry(0.04, 0.1, 10)), kit.basic({ color: '#ffffff' }), N);
   const umbN = 8;
   const umbTopM = new THREE.InstancedMesh(kit.track(new THREE.ConeGeometry(0.42, 0.2, 12)), kit.toon('#ffffff', kit.canvas(256, 64, stripedPaint('#ffffff', '#ffffff', 2, false, 1))), umbN);
   const umbPoleM = new THREE.InstancedMesh(kit.track(new THREE.CylinderGeometry(0.016, 0.016, 1.2, 6)), kit.toon('#f5f5f4'), umbN);
-  for (const m of [towelM, bodyM, headM, hatM, umbTopM, umbPoleM]) {
+  for (const m of [umbTopM, umbPoleM]) {
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
   }
   group.add(pinM, pinTipM);
-  const towelCols = ['#f472b6', '#38bdf8', '#facc15', '#a3e635', '#fb923c', '#c084fc', '#f87171'];
-  const shirtCols = ['#ef4444', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6', '#fafafa', '#84cc16'];
-  const skinCols = ['#f3c6a5', '#e0a882', '#c98a63', '#a86d4a', '#f6d2b8'];
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
   const v = new THREE.Vector3();
   const one = new THREE.Vector3(1, 1, 1);
-  for (let i = 0; i < N; i++) {
-    const x = TOURIST_X[i] ?? 0;
-    const z = tz[i] ?? 0;
-    const yaw = (rnd(803, i) - 0.5) * 0.8;
-    q.setFromEuler(e.set(0, yaw, 0));
-    towelM.setMatrixAt(i, m4.compose(v.set(x, 0.012, z), q, one));
-    towelM.setColorAt(i, c.set(towelCols[i % towelCols.length] ?? '#fff'));
-    const lying = rnd(804, i) > 0.7;
-    q.setFromEuler(e.set(lying ? Math.PI / 2 : -0.15, yaw, 0));
-    bodyM.setMatrixAt(i, m4.compose(v.set(x, lying ? 0.13 : 0.22, z + (lying ? 0.05 : 0)), q, one));
-    bodyM.setColorAt(i, c.set(shirtCols[Math.floor(rnd(805, i) * shirtCols.length)] ?? '#fff'));
-    q.identity();
-    headM.setMatrixAt(i, m4.compose(v.set(x, lying ? 0.15 : 0.5, z + (lying ? -0.28 : 0.03)), q, one));
-    headM.setColorAt(i, c.set(skinCols[Math.floor(rnd(806, i) * skinCols.length)] ?? '#fff'));
-    const hat = rnd(807, i) > 0.55 && !lying;
-    hatM.setMatrixAt(i, m4.compose(v.set(x, hat ? 0.6 : -5, z + 0.03), q, one));
-    hatM.setColorAt(i, c.set(rnd(808, i) > 0.5 ? '#e9c77b' : '#fef3c7'));
-  }
   const umbCols = ['#ef4444', '#3b82f6', '#facc15', '#22c55e', '#f97316', '#a855f7'];
+  const behind = tourists.map((t, j) => (t.z < 0 && t.kind !== 'wade' ? j : -1)).filter((j) => j >= 0);
   for (let k = 0; k < umbN; k++) {
-    const behind = tz.map((z, j) => (z < 0 ? j : -1)).filter((j) => j >= 0);
     const i = behind[Math.floor((k + 0.5) * (behind.length / umbN))] ?? 0;
-    const x = (TOURIST_X[i] ?? 0) + 0.3;
-    const z = (tz[i] ?? 0) - 0.25;
+    const x = (vx[i] ?? 0) + 0.32;
+    const z = (tz[i] ?? 0) - 0.28;
     q.setFromEuler(e.set(0.12, 0, 0.08 * (k % 2 ? 1 : -1)));
     umbPoleM.setMatrixAt(k, m4.compose(v.set(x, 0.6, z), q, one));
     umbTopM.setMatrixAt(k, m4.compose(v.set(x, 1.22, z), q, one));
     umbTopM.setColorAt(k, c.set(umbCols[k % umbCols.length] ?? '#fff'));
   }
-  for (const m of [towelM, bodyM, headM, hatM, umbTopM, umbPoleM]) {
+  for (const m of [umbTopM, umbPoleM]) {
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }
@@ -2209,6 +2654,9 @@ export function createBeachWorld(kit: Kit): WorldScene {
     blueCart.hero.position.y = 2.2 + loopWave(frame, 30) * 0.02;
     redCart.hero.position.y = 2.2 + loopWave(frame, 30, 1.5) * 0.02;
 
+    // Living crowd: breathing, splashing, chatting, heads turning to the carts.
+    crowd(frame);
+
     // Territories, boundary and the tourists' pins.
     const share = shareAt(frame);
     const b = boundaryAt(frame);
@@ -2224,6 +2672,7 @@ export function createBeachWorld(kit: Kit): WorldScene {
     boundaryMat.opacity = 0.9 * share.visible;
     for (let i = 0; i < N; i++) {
       const x = TOURIST_X[i] ?? 0;
+      const px = vx[i] ?? x;
       const z = tz[i] ?? 0;
       // Each tourist reacts a few frames after the boundary passes (a ripple of decisions).
       const delay = 3 + Math.floor(rnd(809, i) * 9);
@@ -2234,9 +2683,9 @@ export function createBeachWorld(kit: Kit): WorldScene {
       const bob = loopWave(frame, 40, i) * 0.03;
       q.identity();
       v.set(s, s, s);
-      pinM.setMatrixAt(i, m4.compose(new THREE.Vector3(x, 0.98 + bob, z), q, v));
+      pinM.setMatrixAt(i, m4.compose(new THREE.Vector3(px, 1.08 + bob, z), q, v));
       q.setFromEuler(e.set(Math.PI, 0, 0));
-      pinTipM.setMatrixAt(i, m4.compose(new THREE.Vector3(x, 0.9 + bob, z), q, v));
+      pinTipM.setMatrixAt(i, m4.compose(new THREE.Vector3(px, 1.0 + bob, z), q, v));
       const col = blueNow ? pinBlue : pinRed;
       pinM.setColorAt(i, col);
       pinTipM.setColorAt(i, col);
