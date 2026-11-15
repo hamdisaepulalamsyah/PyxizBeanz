@@ -36,16 +36,40 @@ export const HOTELLING_HEIGHT = 1920;
 export const SHOT_DIP_FRAMES = 7;
 const LOOP = HOTELLING_DURATION_IN_FRAMES;
 
-/** Opening hook overlay. */
+/** Opening hook overlay (v2.4: magnetic brand snap). */
 export const HOOK = {
+  /** Kicker badge pops in. */
   badgeIn: 2,
+  /** The two brand words start sliding in from the frame edges… */
+  slideFrom: 4,
+  /** …and collide with a magnetic snap in the centre. */
   impactFrame: 16,
-  holdUntil: 80,
-  outEnd: 96,
-  teaser: 'TEORI GAME & MATEMATIKA BISNIS',
-  title: ['Kenapa Minimarket', 'Selalu Nempel?'],
-  kicker: 'HUKUM HOTELLING (1929)',
+  /** Sub-tag pop-in. */
+  subIn: 34,
+  /** "Hukum Hotelling 1929" transition badge. */
+  hotellingIn: 52,
+  holdUntil: 92,
+  outEnd: 108,
+  kicker: 'RAHASIA BISNIS',
+  lead: 'KENAPA',
+  brandA: 'INDOMARET',
+  brandB: 'ALFAMART',
+  tail: 'SELALU NEMPEL?',
+  sub: 'Ternyata Ada Trik Matematikanya!',
+  badge: 'HUKUM HOTELLING 1929',
 } as const;
+
+/** v2.4 caption standard for this video: compact, softly stroked, clear of the subject. */
+export const HOTELLING_CAPTION = {
+  fontSize: 52,
+  bottom: 290,
+  stroke: 6,
+  sidePadding: 90,
+  lineHeight: 1.18,
+} as const;
+
+/** Bottom-corner signature. */
+export const WATERMARK = { text: '@hamdipyxis', opacity: 0.45 } as const;
 
 export function hookShakeAt(frame: number): number {
   const d = frame - HOOK.impactFrame;
@@ -78,11 +102,12 @@ export type Expression = 'neutral' | 'warm' | 'serious' | 'thinking' | 'wonder' 
  * Hand targets. `side` and `hip` are resting poses drawn behind the torso;
  * every other pose reaches forward and is drawn in front of it (Pyxis layer order).
  */
-export type ArmPose = 'side' | 'hip' | 'point' | 'pointHigh' | 'wave' | 'open' | 'push' | 'think' | 'chalk' | 'bag';
+export type ArmPose = 'side' | 'hip' | 'point' | 'pointHigh' | 'wave' | 'open' | 'push' | 'think' | 'ponder' | 'chalk' | 'bag';
 
 export const RESTING_ARMS: readonly ArmPose[] = ['side', 'hip'];
 
-export type CutType = 'cut' | 'dip' | 'flash';
+/** `whip` = horizontal whip-pan, `push` = smooth push-in zoom into a dip. */
+export type CutType = 'cut' | 'dip' | 'flash' | 'whip' | 'push';
 
 type Keys<T> = readonly (readonly [number, T])[];
 
@@ -92,7 +117,7 @@ export interface CameraKey {
   pos: Vec3;
   target: Vec3;
   fov: number;
-  /** Screen roll in radians (π/2 turns a long beach into a vertical map). */
+  /** Small dutch roll in radians (kept tiny: characters must always stand upright). */
   roll?: number;
 }
 
@@ -110,6 +135,11 @@ export interface CastMember {
   /** Eye/head bias, −1 (screen left) … +1 (screen right). */
   look?: Keys<number>;
   scale?: number;
+  /**
+   * Facing (−1 screen-left, +1 screen-right) while standing still. While moving,
+   * facing and stride are locked to the sign of the ground velocity (walkDir).
+   */
+  face?: 1 | -1;
 }
 
 // ── Colour script ───────────────────────────────────────────────────────────
@@ -277,24 +307,29 @@ export interface Shot {
   camera: readonly CameraKey[];
   cast: readonly CastMember[];
   chip?: string;
+  /** Optional clock shown on the frosted location badge. */
+  chipTime?: string;
 }
 
-const HALF_PI = Math.PI / 2;
 /** City sidewalk height (store fronts sit on it). */
 export const CURB_H = 0.16;
 
 /** Shared macro key: f0 and f1799 both sit on it, closing the loop. */
 const LOOP_KEY: Omit<CameraKey, 't'> = { pos: [0.45, 0.5, 2.6], target: [0.05, 0.8, -2.2], fov: 40, roll: 0 };
-const BEACH_MAP: Omit<CameraKey, 't'> = { pos: [0, 14.2, 6.2], target: [0, 0, 0.55], fov: 50, roll: HALF_PI };
+/**
+ * Cinematic high-angle key: `deg` above the horizon (38°–45° for the drone
+ * shots — never top-down, never rolled) so the sea reads wide while every
+ * card still stands upright on the sand.
+ */
+const highAngle = (deg: number, dist: number, target: Vec3, xOffset = 0): Pick<CameraKey, 'pos' | 'target'> => {
+  const r = (deg * Math.PI) / 180;
+  return { pos: [target[0] + xOffset, target[1] + Math.sin(r) * dist, target[2] + Math.cos(r) * dist], target };
+};
+const BEACH_MAP: Omit<CameraKey, 't'> = { ...highAngle(40, 24.5, [0, 0, 1.0]), fov: 52, roll: 0 };
+/** Vendors stand behind their cart's push handle (the handle sits 0.92 m from the cart centre). */
+const VENDOR_OFF = 1.3;
 
 const PEMBELI_HOME: readonly [number, number, number, number] = [0, -0.05, CURB_H, -1.75];
-/** Vendor offset from cart centre while idling beside it. */
-const VENDOR_STAND = 0.85;
-/**
- * Vendor offset while pushing: behind the handle grip (±1.0 m, 0.8 m high) so
- * both hands, leaning in at a 3/4 turn, land on it.
- */
-const VENDOR_PUSH = 1.3;
 
 export const SHOTS: readonly Shot[] = [
   {
@@ -305,7 +340,8 @@ export const SHOTS: readonly Shot[] = [
     world: 'city',
     phase: 'nightCityNeon',
     cut: 'cut',
-    chip: 'JALANAN KOTA • 22:47',
+    chip: 'KOTA MALAM',
+    chipTime: '22:47',
     camera: [
       { t: 0, ...LOOP_KEY },
       { t: 0.24, pos: [0.15, 0.75, 3.6], target: [0, 1.5, -3], fov: 40 },
@@ -316,13 +352,17 @@ export const SHOTS: readonly Shot[] = [
       {
         id: 'pembeli',
         path: [PEMBELI_HOME],
+        // Puzzled and relaxed: head tilt, hand by the chin, weight on one leg,
+        // bag swinging, eyes flicking between the two shop fronts.
         expr: [
           [0, 'thinking'],
+          [0.19, 'wonder'],
+          [0.3, 'thinking'],
           [0.42, 'wonder'],
           [0.78, 'smirk'],
         ],
         armR: [
-          [0, 'think'],
+          [0, 'ponder'],
           [0.4, 'point'],
           [0.62, 'side'],
         ],
@@ -334,6 +374,9 @@ export const SHOTS: readonly Shot[] = [
         ],
         look: [
           [0, 0],
+          [0.08, -0.75],
+          [0.19, 0.75],
+          [0.3, -0.55],
           [0.4, 0.8],
           [0.62, -0.8],
           [0.82, 0],
@@ -350,7 +393,7 @@ export const SHOTS: readonly Shot[] = [
     to: 495,
     world: 'classroom',
     phase: 'theoryLamp',
-    cut: 'dip',
+    cut: 'push',
     chip: 'COLUMBIA, 1929',
     camera: [
       { t: 0, pos: [-1.3, 2.62, 1.15], target: [-0.75, 2.92, 0.15], fov: 36, roll: 0.04 },
@@ -417,8 +460,8 @@ export const SHOTS: readonly Shot[] = [
         armL: [[0, 'side']],
         look: [[0, -0.6]],
       },
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'wave']] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'wave']], armR: [[0, 'side']] },
+      { id: 'pedagangBiru', follow: 'blueCart', face: 1, path: [[0, -VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'wave']] },
+      { id: 'pedagangMerah', follow: 'redCart', face: -1, path: [[0, VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'wave']], armR: [[0, 'side']] },
     ],
   },
   {
@@ -432,11 +475,11 @@ export const SHOTS: readonly Shot[] = [
     chip: 'BAGI RATA 50 : 50',
     camera: [
       { t: 0, ...BEACH_MAP },
-      { t: 1, pos: [0.25, 11.6, 5.6], target: [0, 0, 0.5], fov: 48, roll: HALF_PI + 0.03 },
+      { t: 1, ...highAngle(42, 22.5, [0, 0, 0.9], 0.6), fov: 50, roll: 0.01 },
     ],
     cast: [
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'hip']] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'hip']], armR: [[0, 'side']] },
+      { id: 'pedagangBiru', follow: 'blueCart', face: 1, path: [[0, -VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'side']], armR: [[0, 'hip']] },
+      { id: 'pedagangMerah', follow: 'redCart', face: -1, path: [[0, VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'hip']], armR: [[0, 'side']] },
     ],
   },
   {
@@ -450,13 +493,13 @@ export const SHOTS: readonly Shot[] = [
     cut: 'cut',
     chip: 'GARIS TENGAH',
     camera: [
-      { t: 0, pos: [-2.2, 1.35, 4.2], target: [-4.5, 1.05, 0.1], fov: 42, roll: -0.02 },
-      { t: 0.5, pos: [0, 1.5, 4.4], target: [0, 1.3, -0.4], fov: 44 },
-      { t: 1, pos: [2.2, 1.35, 4.2], target: [4.5, 1.05, 0.1], fov: 42, roll: 0.02 },
+      { t: 0, pos: [-2.2, 2.6, 5.6], target: [-4.5, 0.8, 0.1], fov: 42, roll: -0.02 },
+      { t: 0.5, pos: [0, 2.7, 5.8], target: [0, 1.0, -0.4], fov: 44 },
+      { t: 1, pos: [2.2, 2.6, 5.6], target: [4.5, 0.8, 0.1], fov: 42, roll: 0.02 },
     ],
     cast: [
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'laugh']], armL: [[0, 'side']], armR: [[0, 'open']], look: [[0, 0.5]] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'open']], armR: [[0, 'side']], look: [[0, -0.5]] },
+      { id: 'pedagangBiru', follow: 'blueCart', face: 1, path: [[0, -VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'laugh']], armL: [[0, 'side']], armR: [[0, 'open']], look: [[0, 0.5]] },
+      { id: 'pedagangMerah', follow: 'redCart', face: -1, path: [[0, VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm']], armL: [[0, 'open']], armR: [[0, 'side']], look: [[0, -0.5]] },
     ],
   },
   {
@@ -469,19 +512,21 @@ export const SHOTS: readonly Shot[] = [
     cut: 'cut',
     chip: 'BIRU MAJU KE TENGAH',
     camera: [
-      { t: 0, pos: [-3.1, 1.45, 4.5], target: [-4.5, 0.95, 0.15], fov: 40, roll: -0.02 },
-      { t: 0.32, pos: [-2.5, 1.5, 4.6], target: [-3.0, 0.95, 0.15], fov: 42 },
-      { t: 0.7, pos: [0.7, 1.6, 4.8], target: [-0.4, 0.95, 0.15], fov: 44, roll: 0.02 },
-      { t: 1, pos: [0.1, 12.2, 5.6], target: [0, 0, 0.5], fov: 48, roll: HALF_PI },
+      // 3/4 high tracking shot that keeps Ahmad and his cart framed together above the crowd.
+      { t: 0, pos: [-3.9, 3.0, 6.4], target: [-5.0, 0.7, 0.2], fov: 42, roll: -0.012 },
+      { t: 0.32, pos: [-2.9, 3.0, 6.4], target: [-3.9, 0.7, 0.2], fov: 42 },
+      { t: 0.7, pos: [0.2, 3.1, 6.6], target: [-0.9, 0.7, 0.2], fov: 44, roll: 0.012 },
+      { t: 1, ...highAngle(42, 23, [0, 0, 1.0], 0.4), fov: 50, roll: 0 },
     ],
     cast: [
       {
+        // Ahmad: side-on 3/4 pushing profile, leaning into the handle.
         id: 'pedagangBiru',
         follow: 'blueCart',
-        path: [[0, -VENDOR_PUSH, 0, CART_Z + 0.1]],
+        face: 1,
+        path: [[0, -VENDOR_OFF, 0, CART_Z + 0.1]],
         expr: [
-          [0, 'serious'],
-          [0.4, 'smirk'],
+          [0, 'smirk'],
           [0.75, 'laugh'],
         ],
         armL: [[0, 'push']],
@@ -493,7 +538,8 @@ export const SHOTS: readonly Shot[] = [
       {
         id: 'pedagangMerah',
         follow: 'redCart',
-        path: [[0, VENDOR_PUSH, 0, CART_Z + 0.1]],
+        face: -1,
+        path: [[0, VENDOR_OFF, 0, CART_Z + 0.1]],
         expr: [
           [0, 'neutral'],
           [0.62, 'shock'],
@@ -515,15 +561,17 @@ export const SHOTS: readonly Shot[] = [
     cut: 'flash',
     chip: 'MERAH MEMBALAS',
     camera: [
-      { t: 0, pos: [6.6, 1.55, 4.6], target: [5.0, 0.95, 0.15], fov: 44, roll: 0.025 },
-      { t: 0.55, pos: [4.4, 1.6, 4.8], target: [2.9, 0.95, 0.15], fov: 46 },
-      { t: 1, pos: [1.6, 1.6, 5.0], target: [0.5, 0.95, 0.1], fov: 46, roll: -0.01 },
+      // Tracks the red vendor's pushing profile, then widens on both carts.
+      { t: 0, pos: [5.9, 3.0, 6.4], target: [5.2, 0.7, 0.2], fov: 42, roll: 0.012 },
+      { t: 0.55, pos: [3.6, 3.0, 6.4], target: [2.9, 0.7, 0.2], fov: 43 },
+      { t: 1, pos: [0.6, 3.2, 8.0], target: [0.3, 0.8, 0.1], fov: 50, roll: -0.01 },
     ],
     cast: [
       {
         id: 'pedagangMerah',
         follow: 'redCart',
-        path: [[0, VENDOR_PUSH, 0, CART_Z + 0.1]],
+        face: -1,
+        path: [[0, VENDOR_OFF, 0, CART_Z + 0.1]],
         expr: [
           [0, 'serious'],
           [0.85, 'smirk'],
@@ -534,7 +582,8 @@ export const SHOTS: readonly Shot[] = [
       {
         id: 'pedagangBiru',
         follow: 'blueCart',
-        path: [[0, -VENDOR_PUSH, 0, CART_Z + 0.1]],
+        face: 1,
+        path: [[0, -VENDOR_OFF, 0, CART_Z + 0.1]],
         expr: [
           [0, 'laugh'],
           [0.4, 'shock'],
@@ -542,11 +591,11 @@ export const SHOTS: readonly Shot[] = [
         ],
         armL: [
           [0, 'side'],
-          [0.45, 'push'],
+          [0.45, 'hip'],
         ],
         armR: [
           [0, 'wave'],
-          [0.45, 'push'],
+          [0.45, 'side'],
         ],
         look: [[0, 0.7]],
       },
@@ -562,14 +611,14 @@ export const SHOTS: readonly Shot[] = [
     cut: 'cut',
     chip: 'KESEIMBANGAN NASH',
     camera: [
-      { t: 0, pos: [0, 1.35, 4.8], target: [0, 1.0, 0], fov: 44 },
-      { t: 0.36, pos: [3.4, 1.9, 3.9], target: [0, 0.95, 0], fov: 44, roll: 0.02 },
-      { t: 0.7, pos: [0.4, 6.2, 5.6], target: [0, 0.4, 0.2], fov: 46, roll: 0.6 },
-      { t: 1, pos: [0, 12.4, 5.3], target: [0, 0, 0.5], fov: 48, roll: HALF_PI },
+      { t: 0, pos: [0, 3.0, 7.4], target: [0, 0.75, 0], fov: 44 },
+      { t: 0.36, pos: [3.6, 2.9, 5.8], target: [0, 0.8, 0], fov: 44, roll: 0.02 },
+      { t: 0.7, ...highAngle(39, 8.6, [0, 0.4, 0.4], 0.5), fov: 46, roll: 0.01 },
+      { t: 1, ...BEACH_MAP },
     ],
     cast: [
-      { id: 'pedagangBiru', follow: 'blueCart', path: [[0, -VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.3, 'laugh']], armL: [[0, 'side']], armR: [[0, 'wave']], look: [[0, 0.6]] },
-      { id: 'pedagangMerah', follow: 'redCart', path: [[0, VENDOR_STAND, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.35, 'laugh']], armL: [[0, 'wave']], armR: [[0, 'side']], look: [[0, -0.6]] },
+      { id: 'pedagangBiru', follow: 'blueCart', face: 1, path: [[0, -VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.3, 'laugh']], armL: [[0, 'side']], armR: [[0, 'wave']], look: [[0, 0.6]] },
+      { id: 'pedagangMerah', follow: 'redCart', face: -1, path: [[0, VENDOR_OFF, 0, CART_Z + 0.1]], expr: [[0, 'warm'], [0.35, 'laugh']], armL: [[0, 'wave']], armR: [[0, 'side']], look: [[0, -0.6]] },
     ],
   },
   {
@@ -579,7 +628,7 @@ export const SHOTS: readonly Shot[] = [
     to: 1610,
     world: 'city',
     phase: 'nightCityWarm',
-    cut: 'dip',
+    cut: 'whip',
     chip: 'BUKAN KEBETULAN',
     camera: [
       { t: 0, pos: [0, 7.4, 6.4], target: [0, 3.6, -3], fov: 46, roll: 0.02 },
@@ -614,7 +663,8 @@ export const SHOTS: readonly Shot[] = [
     phase: 'nightCityWarm',
     phaseTo: 'nightCityNeon',
     cut: 'cut',
-    chip: 'JALANAN KOTA • 22:47',
+    chip: 'KOTA MALAM',
+    chipTime: '22:47',
     camera: [
       { t: 0, pos: [0.1, 2.0, 8.6], target: [0, 2.3, -3], fov: 48, roll: -0.01 },
       { t: 0.5, pos: [0.3, 0.95, 4.6], target: [0, 1.3, -2.6], fov: 42, roll: 0.015 },
@@ -636,7 +686,7 @@ export const SHOTS: readonly Shot[] = [
         armR: [
           [0, 'side'],
           [0.25, 'point'],
-          [0.62, 'think'],
+          [0.62, 'ponder'],
         ],
         look: [
           [0, -0.3],
@@ -650,9 +700,12 @@ export const SHOTS: readonly Shot[] = [
   },
 ];
 
-/** Kinetic keyword slams (visual change every ~2 s on top of the camera beats). */
-export const KEYWORDS: readonly { from: number; to: number; text: string; accent: string }[] = [
-  { from: 112, to: 170, text: 'NEMPEL TERUS?!', accent: '#FBBF24' },
+/**
+ * Kinetic keyword stickers (visual change every ~2 s on top of the camera beats).
+ * `magnet` stickers arrive as two halves that snap together.
+ */
+export const KEYWORDS: readonly { from: number; to: number; text: string; accent: string; magnet?: readonly [string, string] }[] = [
+  { from: 116, to: 172, text: 'NEMPEL TERUS?!', accent: '#FBBF24', magnet: ['NEMPEL', 'TERUS?!'] },
   { from: 196, to: 258, text: 'MUSUHAN?', accent: '#ff5d8f' },
   { from: 300, to: 372, text: 'BUKAN KEBETULAN', accent: '#FBBF24' },
   { from: 410, to: 490, text: 'HUKUM HOTELLING', accent: '#FBBF24' },
@@ -660,9 +713,12 @@ export const KEYWORDS: readonly { from: number; to: number; text: string; accent
   { from: 840, to: 898, text: '50 : 50', accent: '#FBBF24' },
   { from: 1010, to: 1100, text: 'REBUT PASAR!', accent: '#60a5fa' },
   { from: 1170, to: 1250, text: 'IKUT GESER!', accent: '#f87171' },
-  { from: 1330, to: 1410, text: 'BERDAMPINGAN', accent: '#FBBF24' },
-  { from: 1520, to: 1600, text: 'SELALU NEMPEL', accent: '#FBBF24' },
+  { from: 1330, to: 1410, text: 'BERDAMPINGAN', accent: '#FBBF24', magnet: ['BERDAM', 'PINGAN'] },
+  { from: 1520, to: 1600, text: 'SELALU NEMPEL', accent: '#FBBF24', magnet: ['SELALU', 'NEMPEL'] },
 ];
+
+/** Frames after a magnet sticker's start at which its halves snap together. */
+export const MAGNET_SNAP_FRAMES = 8;
 
 // ── Shot lookup ─────────────────────────────────────────────────────────────
 
@@ -751,12 +807,6 @@ export interface CastPose {
   walkDir: number;
   /** Ground speed in m/frame. */
   speed: number;
-  /** Unit world-space travel direction (y = 0); zero vector when standing. */
-  heading: THREE.Vector3;
-  /** 0…1 how committed the actor is to moving (eases facing in/out). */
-  moving: number;
-  /** World +x / −x side a cart-follower pushes toward (0 if not following a cart). */
-  pushDirX: number;
 }
 
 const tmpA = new THREE.Vector3();
@@ -780,20 +830,18 @@ export function castPoseAt(member: CastMember, frame: number, walkPhasePerMetre:
   }
   pathPoint(member, pAt(frame - 1), frame - 1, tmpA);
   const dx = position.x - tmpA.x;
-  const dz = position.z - tmpA.z;
-  const speed = Math.hypot(dx, dz);
+  const speed = Math.hypot(dx, position.z - tmpA.z);
   const scale = member.scale ?? 1;
-  const heading = speed > 1e-5 ? new THREE.Vector3(dx / speed, 0, dz / speed) : new THREE.Vector3();
-  const offsetX = member.path[0]?.[1] ?? 0;
+  const moving = speed > 0.0012;
+  // Facing and stride are locked to the sign of the ground velocity (for cart
+  // pushers that is exactly the cart's displacement vector); at rest the
+  // authored facing holds, so a pusher keeps facing his handle.
+  const walkDir = moving && Math.abs(dx) > 1e-5 ? Math.sign(dx) : (member.face ?? 1);
   return {
     position,
-    walkPhase: speed > 0.0012 ? (travelled / scale) * walkPhasePerMetre : null,
-    walkDir: dx >= 0 ? 1 : -1,
+    walkPhase: moving ? (travelled / scale) * walkPhasePerMetre : null,
+    walkDir,
     speed,
-    heading,
-    moving: smoothstep(0.0012, 0.007, speed),
-    // The vendor stands behind the handle, so the cart is on the opposite side of the offset.
-    pushDirX: member.follow ? (offsetX <= 0 ? 1 : -1) : 0,
   };
 }
 
@@ -840,12 +888,55 @@ export function transitionAt(frame: number): { color: string; alpha: number } {
       const a = 1 - Math.abs(d) / (SHOT_DIP_FRAMES + 1);
       return { color: '#07040d', alpha: a * a * (3 - 2 * a) };
     }
+    if (s.cut === 'push' && d >= -4 && d <= 6) {
+      // Short, soft dip hidden inside the push-in zoom.
+      const a = d < 0 ? (d + 5) / 5 : 1 - d / 7;
+      return { color: '#07040d', alpha: clamp01(a) * 0.9 };
+    }
     if (s.cut === 'flash' && d >= -2 && d < 12) {
       const a = d < 0 ? (d + 3) / 3 : Math.exp(-d / 3.5);
       return { color: '#fff7e0', alpha: clamp01(a) * 0.85 };
     }
   }
   return { color: '#000', alpha: 0 };
+}
+
+/** Half-length (frames) of the whip-pan and push-in windows. */
+export const WHIP_FRAMES = 8;
+export const PUSH_FRAMES = 12;
+
+/**
+ * Lens-level transition effects applied to the 3D layer: a horizontal
+ * whip-pan (slide + directional blur) or a smooth push-in zoom.
+ */
+export function transitionFxAt(frame: number): { shiftX: number; blurX: number; zoom: number; blur: number } {
+  for (const s of SHOTS) {
+    const d = frame - s.from;
+    if (s.cut === 'whip' && Math.abs(d) <= WHIP_FRAMES) {
+      const u = d / WHIP_FRAMES;
+      // Accelerate out of the old shot, decelerate into the new one.
+      const k = d < 0 ? Math.pow(1 + u, 3) : Math.pow(1 - u, 3);
+      // The zoom always covers the slide, so no frame edge is ever revealed.
+      return { shiftX: (d < 0 ? -1 : 1) * k * 0.18, blurX: k * 60, zoom: 1 + k * 0.4, blur: 0 };
+    }
+    if (s.cut === 'push' && d >= -PUSH_FRAMES && d <= 8) {
+      const k = d < 0 ? Math.pow(1 + d / PUSH_FRAMES, 2.4) : Math.pow(1 - d / 8, 2);
+      return { shiftX: 0, blurX: 0, zoom: d < 0 ? 1 + k * 0.3 : 1 + k * 0.12, blur: k * 7 };
+    }
+  }
+  return { shiftX: 0, blurX: 0, zoom: 1, blur: 0 };
+}
+
+/** Camera yaw kick (radians, + pans right) that drives the whip-pan in 3D. */
+function whipYawAt(frame: number): number {
+  for (const s of SHOTS) {
+    if (s.cut !== 'whip') continue;
+    const d = frame - s.from;
+    if (Math.abs(d) > WHIP_FRAMES) continue;
+    const u = d / WHIP_FRAMES;
+    return d < 0 ? Math.pow(1 + u, 3) * 0.55 : -Math.pow(1 - u, 3) * 0.55;
+  }
+  return 0;
 }
 
 // ── Camera ──────────────────────────────────────────────────────────────────
@@ -921,6 +1012,17 @@ export function sampleCamera(frame: number, out?: CameraSample): CameraSample {
   sample.position.y += loopWave(frame, 31, 2.0) * 0.009;
   sample.target.x += loopWave(frame, 19, 2.6) * 0.01;
   sample.roll += loopWave(frame, 13, 0.7) * 0.004;
+
+  // Whip-pan: swing the look direction around the lens (Y axis).
+  const yaw = whipYawAt(frame);
+  if (yaw !== 0) {
+    const dx = sample.target.x - sample.position.x;
+    const dz = sample.target.z - sample.position.z;
+    const c = Math.cos(-yaw);
+    const s = Math.sin(-yaw);
+    sample.target.x = sample.position.x + dx * c + dz * s;
+    sample.target.z = sample.position.z - dx * s + dz * c;
+  }
 
   const k = hookShakeAt(frame);
   if (k > 0.001) {

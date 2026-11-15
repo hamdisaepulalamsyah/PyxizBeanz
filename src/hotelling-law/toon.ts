@@ -40,16 +40,6 @@ const PX = LH / ACTOR_PLANE_HEIGHT;
 /** World offset that puts card row SOLE exactly on the floor. */
 const SOLE_LIFT = ((LH - SOLE) / LH) * ACTOR_PLANE_HEIGHT;
 
-/** Card plane for extras: same proportions as the hero cast, soles on the origin. */
-export function createExtraCardGeometry(): THREE.PlaneGeometry {
-  const geo = new THREE.PlaneGeometry(ACTOR_PLANE_WIDTH, ACTOR_PLANE_HEIGHT);
-  geo.translate(0, ACTOR_PLANE_HEIGHT / 2 - SOLE_LIFT, 0);
-  return geo;
-}
-
-/** Card canvas size for extras (half the hero resolution). */
-export const EXTRA_CARD_PX = { w: LW / 2, h: LH / 2 } as const;
-
 const PLUM = '#241726';
 const HEAD_CX = LW / 2;
 const HEAD_HALF_W = 240;
@@ -74,10 +64,10 @@ const SIGN = [-1, 1] as const;
 
 // ── Looks ───────────────────────────────────────────────────────────────────
 
-export type Hair = 'cap' | 'short' | 'professor' | 'sunhat';
-export type Top = 'polo' | 'suit' | 'hoodie' | 'hawaiian';
+type Hair = 'cap' | 'short' | 'professor' | 'sunhat';
+type Top = 'polo' | 'suit' | 'hoodie' | 'hawaiian';
 
-export interface HumanLook {
+interface HumanLook {
   kind: 'human';
   skin: string;
   skinShade: string;
@@ -95,13 +85,7 @@ export interface HumanLook {
   shoeAccent: string;
   glasses: boolean;
   mustache: boolean;
-  /** Dark beach sunglasses over the eyes. */
-  shades?: boolean;
-  /** Bare legs, board shorts and sandals (defaults to true for sun-hat looks). */
-  beach?: boolean;
 }
-
-const isBeach = (look: HumanLook): boolean => look.beach ?? look.hair === 'sunhat';
 
 interface CatLook {
   kind: 'cat';
@@ -322,29 +306,10 @@ export interface ToonDrive {
   /** Eye / head bias −1 … +1. */
   look: number;
   walkPhase: number | null;
-  /** Screen-space direction of travel (drives the stride). */
   walkDir: number;
-  /**
-   * Where the body faces on screen: `dir` ±1, `amount` 0 (square to camera) … 1
-   * (full 3/4 turn toward `dir`), `away` 0…1 when heading into the screen (back view).
-   */
-  facing: Facing;
   light: { side: 1 | -1; rim: string; rimStrength: number };
   /** Lip-sync mouth shape for this frame. */
   viseme: Viseme;
-}
-
-export interface Facing {
-  dir: 1 | -1;
-  amount: number;
-  away: number;
-}
-
-export const FACE_CAMERA: Facing = { dir: 1, amount: 0, away: 0 };
-
-/** 0…1 share of a keyed arm blend that is in `pose`. */
-export function armShare(b: Blend<ArmPose>, pose: ArmPose): number {
-  return (b.from === pose ? 1 - b.mix : 0) + (b.to === pose ? b.mix : 0);
 }
 
 interface Pose extends FacePreset {
@@ -360,15 +325,30 @@ interface Pose extends FacePreset {
   shiftX: number;
   shiftRot: number;
   bow: number;
-  /** Back of the head toward camera (walking away). */
-  back: boolean;
-  /** Both hands on a push handle (0…1): lean in, eyes on the path. */
-  push: number;
 }
 
 /** Breaths and weight shifts complete whole cycles per 60 s loop (≈ 0.22 Hz / 0.1 Hz). */
 const BREATH_CYCLES = 13;
 const WEIGHT_CYCLES = 6;
+/** Forward lean of the pushing profile (18°). */
+const PUSH_LEAN = (18 * Math.PI) / 180;
+/** Puzzled head tilt of the `ponder` pose (≈7°). */
+const PONDER_TILT = (7 * Math.PI) / 180;
+
+/** How much of `pose` a blended arm currently shows (0..1). */
+function poseWeight(b: Blend<ArmPose>, pose: ArmPose): number {
+  return (b.from === pose ? 1 - b.mix : 0) + (b.to === pose ? b.mix : 0);
+}
+
+/** 0..1 — both hands on the cart handle → side-on 3/4 pushing profile. */
+export function pushWeight(d: Pick<ToonDrive, 'armL' | 'armR'>): number {
+  return (poseWeight(d.armL, 'push') + poseWeight(d.armR, 'push')) / 2;
+}
+
+/** 0..1 — relaxed puzzled stance (hand by the chin, weight on one leg). */
+function ponderWeight(d: Pick<ToonDrive, 'armL' | 'armR'>): number {
+  return Math.max(poseWeight(d.armL, 'ponder'), poseWeight(d.armR, 'ponder'));
+}
 
 function poseFor(d: ToonDrive, seed: number): Pose {
   const a = PRESETS[d.expression.from];
@@ -378,7 +358,13 @@ function poseFor(d: ToonDrive, seed: number): Pose {
   const f = d.frame;
   const talking = d.viseme.open > 0.05 ? 1 : 0;
   const sway = loopWave(f, 7, seed) * 0.04 + loopWave(f, 19, seed * 2) * 0.015 * (1 + talking);
-  const turn = clamp01((d.look + 1) / 2) * 2 - 1;
+  const dir = d.walkDir < 0 ? -1 : 1;
+  const push = pushWeight(d);
+  const ponder = ponderWeight(d);
+  // Pushing: head and eyes locked forward along the walk direction.
+  const turnBase = clamp01((d.look + 1) / 2) * 2 - 1;
+  const turn = lerp(turnBase, dir * 1.35, push);
+  const ponderSide = poseWeight(d.armR, 'ponder') >= poseWeight(d.armL, 'ponder') ? 1 : -1;
   const bp = (2 * Math.PI * BREATH_CYCLES * f) / 1800 + seed;
   const inhale = (p: number): number => 0.5 - 0.5 * Math.cos(p + 0.35 * Math.sin(p));
   const breathOpen = inhale(bp);
@@ -389,39 +375,35 @@ function poseFor(d: ToonDrive, seed: number): Pose {
   const saccade = (hash01(seed + 53, Math.floor((f + seed * 7) / 38)) - 0.5) * 0.32;
   const nodTalk = Math.max(0, Math.sin(f * 0.55 + seed)) * 0.05 * talking;
   const viseme = d.viseme;
-  // Facing: walking / pushing turns head, eyes and body toward the travel direction.
-  const fa = clamp01(d.facing.amount);
-  const fdir = d.facing.dir;
-  const push = clamp01((armShare(d.armL, 'push') + armShare(d.armR, 'push')) / 2);
-  const baseTurn = turn * 0.55 + sway;
-  const faced = lerp(baseTurn, fdir * 0.86 + sway * 0.4, fa);
-  const baseLookX = Math.max(-1, Math.min(1, turn * 0.9 + saccade));
   return {
-    lid: mk('lid') + push * fa * 0.08,
+    lid: mk('lid'),
     browRaise: mk('browRaise') + viseme.open * 0.12,
-    browInner: mk('browInner') - push * fa * 0.25,
+    browInner: mk('browInner'),
     browAsym: mk('browAsym'),
-    smile: lerp(mk('smile'), Math.min(mk('smile'), 0.15), push * fa),
+    smile: mk('smile'),
     pull: mk('pull'),
-    // Eyes drop slightly to the path ahead while pushing.
-    lookY: lerp(mk('lookY'), 0.35, push * fa),
+    lookY: lerp(mk('lookY'), 0.05, push),
     wide: mk('wide'),
     gape: mk('gape'),
-    happy: mk('happy') * (1 - push * fa),
+    happy: mk('happy'),
     frame: f,
-    turn: faced,
-    tilt: faced * 0.07 + loopWave(f, 5, seed) * 0.025 - shiftRot * 0.6 + mk('browAsym') * 0.04,
-    lookX: lerp(baseLookX, fdir * 1.0 + saccade * 0.15, fa),
-    blink: mk('happy') > 0.5 && push * fa < 0.5 ? 0 : blinkAt(f, seed),
+    turn: turn * 0.55 + sway * (1 - push),
+    tilt:
+      (turn * 0.55 + sway) * 0.07 * (1 - push) +
+      loopWave(f, 5, seed) * 0.025 -
+      shiftRot * 0.6 +
+      mk('browAsym') * 0.04 * (1 - ponder) +
+      ponder * ponderSide * (PONDER_TILT + loopWave(f, 4, seed) * 0.012),
+    lookX: lerp(Math.max(-1, Math.min(1, turn * 0.9 + saccade)), dir, push),
+    blink: mk('happy') > 0.5 ? 0 : blinkAt(f, seed),
     viseme,
     breath: -(breathOpen - 0.5) * 6,
     breathOpen,
     breathHead: -(inhale(bp - 0.5) - 0.5) * 4,
-    shiftX: walking ? 0 : weight * 5,
-    shiftRot,
-    bow: nodTalk + push * fa * 0.35,
-    back: d.facing.away > 0.5,
-    push,
+    // Contrapposto: hips settle over the standing leg (opposite the chin hand).
+    shiftX: walking ? 0 : weight * 5 * (1 - ponder) - ponder * ponderSide * 12,
+    shiftRot: shiftRot * (1 - ponder) + ponder * ponderSide * 0.018,
+    bow: nodTalk,
   };
 }
 
@@ -498,10 +480,11 @@ interface Frame {
   footN: readonly [number, number];
   walking: boolean;
   walkDir: number;
-  /** Direction the body faces (knees, toes, lean); equals walkDir unless back-pedalling. */
-  faceDir: number;
-  /** 0…1 three-quarter turn of the body toward faceDir. */
-  faceAmt: number;
+  /** 0..1 pushing-profile weight. */
+  push: number;
+  /** 0..1 relaxed contrapposto weight and which leg (sign) is the relaxed one. */
+  relax: number;
+  relaxSide: number;
 }
 
 const STRIDE_AMP = 44;
@@ -528,28 +511,36 @@ function frameFor(pose: Pose, drive: ToonDrive): Frame {
   const walking = drive.walkPhase !== null;
   const phase = drive.walkPhase ?? 0;
   const dir = drive.walkDir < 0 ? -1 : 1;
-  const bob = walking ? Math.cos(phase * 2) * 3.5 : 0;
+  const push = pushWeight(drive);
+  const relax = walking ? 0 : ponderWeight(drive);
+  const relaxSide = poseWeight(drive.armR, 'ponder') >= poseWeight(drive.armL, 'ponder') ? 1 : -1;
+  // Pushers stride longer and sit a little lower into the push.
+  const bob = walking ? Math.cos(phase * 2) * (3.5 + push * 2) : 0;
+  const crouch = push * 10;
   const cyc = [0, 1].map((i) => (walking ? footCycle(phase + i * Math.PI) : { x: 0, lift: 0, pitch: 0 }));
   const at = (i: number, k: 'x' | 'lift' | 'pitch'): number => cyc[i]?.[k] ?? 0;
   const cx = HEAD_CX + pose.turn * 3;
-  const fa = clamp01(drive.facing.amount);
-  const faceDir = fa > 0.15 ? drive.facing.dir : dir;
+  // Standing push stance: the leg on the walk side leads, the other braces back.
+  const stance = (i: number): number => (walking ? 0 : push * ((SIGN[i] ?? 1) === dir ? 26 : -48) * dir);
+  // …with its heel peeled off the ground (and a relaxed contrapposto heel).
+  const braced = (i: number): number =>
+    walking ? 0 : push * ((SIGN[i] ?? 1) === dir ? 0 : 0.32) + relax * ((SIGN[i] ?? 1) === relaxSide ? 0.22 : 0);
   return {
     cx,
-    top: TORSO_TOP + bob + pose.breath * 0.5,
-    hipY: HIP_Y + bob,
+    top: TORSO_TOP + bob + pose.breath * 0.5 + crouch,
+    hipY: HIP_Y + bob + crouch,
     breathScale: 1 + pose.breathOpen * 0.02,
-    // Head leads the body into the direction of travel.
-    headX: HEAD_CX + pose.turn * 9 + (walking ? faceDir * 4 : 0) + faceDir * fa * 10 + faceDir * pose.push * 8,
-    headY: HEAD_CY + bob + pose.breathHead * 0.6 + pose.bow * 10,
+    headX: HEAD_CX + pose.turn * 9 + (walking ? dir * 4 : 0),
+    headY: HEAD_CY + bob + pose.breathHead * 0.6 + pose.bow * 10 + crouch,
     lift: [at(0, 'lift') * SWING_LIFT, at(1, 'lift') * SWING_LIFT],
-    stride: [at(0, 'x') * STRIDE_AMP * dir, at(1, 'x') * STRIDE_AMP * dir],
-    pitch: [at(0, 'pitch'), at(1, 'pitch')],
+    stride: [at(0, 'x') * STRIDE_AMP * dir + stance(0), at(1, 'x') * STRIDE_AMP * dir + stance(1)],
+    pitch: [at(0, 'pitch') - braced(0), at(1, 'pitch') - braced(1)],
     footN: [at(0, 'x'), at(1, 'x')],
     walking,
     walkDir: dir,
-    faceDir,
-    faceAmt: fa,
+    push,
+    relax,
+    relaxSide,
   };
 }
 
@@ -566,7 +557,7 @@ function drawShoe(ctx: CanvasRenderingContext2D, look: HumanLook, x: number, sol
     ctx.fill();
     return;
   }
-  if (isBeach(look)) {
+  if (look.hair === 'sunhat') {
     // Sandals on bare feet.
     filled(ctx, () => ctx.ellipse(x, sole - 15, 36, 15, 0, 0, Math.PI * 2), look.skin, 6);
     filled(ctx, () => ctx.roundRect(x - 44, sole - 8, 88, 8, 4), look.shoeUpper, 5);
@@ -598,22 +589,23 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, dri
   const legs = SIGN.map((s, i) => {
     const lift = fr.lift[i] ?? 0;
     const pitch = fr.pitch[i] ?? 0;
+    // Relaxed (non-weight-bearing) leg tucks in toward the standing leg.
+    const loose = s === fr.relaxSide ? fr.relax : 0;
     const hip: Pt = [fr.cx + s * 34, fr.hipY];
-    const ankle: Pt = [fr.cx + s * 38 + (fr.stride[i] ?? 0), ANKLE_Y - lift - Math.max(0, -pitch) * 30];
-    let knee: Pt = [fr.cx + s * 37, lerp(fr.hipY, ANKLE_Y, 0.5) - lift * 0.5];
-    if (fr.walking) {
+    const ankle: Pt = [fr.cx + s * 38 + (fr.stride[i] ?? 0) - s * loose * 16, ANKLE_Y - lift - Math.max(0, -pitch) * 30];
+    let knee: Pt = [fr.cx + s * 37 - s * loose * 22, lerp(fr.hipY, ANKLE_Y, 0.5) - lift * 0.5 + loose * 4];
+    if (fr.walking || Math.abs(fr.stride[i] ?? 0) > 1) {
       // Two-bone IK, knee bends toward the walk direction.
       const half = ((ANKLE_Y - HIP_Y) / 2) * 1.004;
       const dx = ankle[0] - hip[0];
       const dy = ankle[1] - hip[1];
       const dd = Math.max(1, Math.hypot(dx, dy));
       const h = Math.sqrt(Math.max(0, half * half - (dd / 2) * (dd / 2)));
-      // Knees bend toward where the body faces (a back-pedal keeps the knees forward).
-      knee = [(hip[0] + ankle[0]) / 2 + (dy / dd) * h * fr.faceDir, (hip[1] + ankle[1]) / 2 - (dx / dd) * h * fr.faceDir];
+      knee = [(hip[0] + ankle[0]) / 2 + (dy / dd) * h * fr.walkDir, (hip[1] + ankle[1]) / 2 - (dx / dd) * h * fr.walkDir];
     }
     return { s, hip, knee, ankle, lift, pitch };
   });
-  const width = isBeach(look) ? 30 : 48;
+  const width = look.hair === 'sunhat' ? 30 : 48;
   for (const l of legs) {
     const trace = (): void => {
       ctx.beginPath();
@@ -627,7 +619,7 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, dri
     ctx.strokeStyle = PLUM;
     ctx.lineWidth = width + 9;
     ctx.stroke();
-    ctx.strokeStyle = isBeach(look) ? look.skin : look.bottomColor;
+    ctx.strokeStyle = look.hair === 'sunhat' ? look.skin : look.bottomColor;
     ctx.lineWidth = width;
     ctx.stroke();
     // Far-side form shade.
@@ -642,23 +634,19 @@ function drawLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, dri
   for (const l of legs) {
     // Pitch about toe (heel up) or heel (toe up) so a planted shoe never sinks below SOLE.
     const sx = l.ankle[0] + l.s * 10;
-    const px = sx + (l.pitch < 0 ? 1 : -1) * fr.faceDir * 48;
+    const px = sx + (l.pitch < 0 ? 1 : -1) * fr.walkDir * 48;
     const py = SOLE - l.lift;
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(-l.pitch * fr.faceDir);
+    ctx.rotate(-l.pitch * fr.walkDir);
     ctx.translate(-px, -py);
     drawShoe(ctx, look, sx, SOLE - l.lift, l.s);
     ctx.restore();
   }
-  drawSeat(ctx, look, fr);
-}
-
-/** Shorts / trouser seat over the leg tops. */
-function drawSeat(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame): void {
-  const seatH = isBeach(look) ? 96 : 64;
+  // Shorts / trouser seat over the leg tops.
+  const seatH = look.hair === 'sunhat' ? 96 : 64;
   filled(ctx, () => ctx.roundRect(fr.cx - 74, fr.hipY - 34, 148, seatH, 24), look.bottomColor, OUTLINE);
-  if (isBeach(look)) {
+  if (look.hair === 'sunhat') {
     // Board-short hems with a stripe.
     ctx.fillStyle = shade(look.bottomColor, 0.45);
     ctx.fillRect(fr.cx - 72, fr.hipY + seatH - 52, 144, 8);
@@ -875,7 +863,9 @@ function drawTorso(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, dr
 // ── Arms, hands, props ──────────────────────────────────────────────────────
 
 function shoulderOf(s: number, fr: Frame): Pt {
-  return [fr.cx + s * 80 * fr.breathScale, fr.top + 30];
+  // Side-on pushing profile: the shoulders turn and narrow toward the handle.
+  const span = 80 * fr.breathScale * (1 - 0.55 * fr.push);
+  return [fr.cx + s * span + fr.walkDir * 10 * fr.push, fr.top + 30];
 }
 
 function wristTarget(pose: ArmPose, s: number, i: number, fr: Frame, frame: number, seed: number): Pt {
@@ -897,11 +887,19 @@ function wristTarget(pose: ArmPose, s: number, i: number, fr: Frame, frame: numb
       return [cx + s * (178 + Math.sin(frame * 0.42 + seed) * 24), top - 112 + Math.cos(frame * 0.42 + seed) * 8];
     case 'open':
       return [cx + s * 176, top + 138 + idle];
-    case 'push':
-      // Both hands forward on the cart handle, just below chest height.
-      return [cx + fr.faceDir * 128 + s * 10, top + 64 + idle * 0.3];
+    case 'push': {
+      // Both hands reach forward (walk direction) to the cart's push bar at
+      // chest height; the far hand sits a touch higher on the bar.
+      const far = s === fr.walkDir;
+      const reach = lerp(52 * s, fr.walkDir * (far ? 168 : 190), fr.push);
+      const y = lerp(top + 172, top + (far ? 52 : 62), fr.push);
+      return [cx + reach, y + idle * 0.25];
+    }
     case 'think':
       return [fr.headX + s * 34, fr.headY + 104];
+    case 'ponder':
+      // Relaxed hand resting beside the jaw / temple, drifting slightly.
+      return [fr.headX + s * 104 + loopWave(frame, 3, seed) * 4, fr.headY + 50 + loopWave(frame, 5, seed + 1) * 5];
     case 'chalk':
       return [cx + s * 232, top - 64 + Math.sin(frame * 0.3) * 10];
     case 'bag': {
@@ -954,8 +952,8 @@ function armsFor(drive: ToonDrive, fr: Frame, seed: number): ArmSolve[] {
     const pose = blend.mix > 0.5 ? blend.to : blend.from;
     const shoulder = shoulderOf(s, fr);
     const { elbow, wrist } = solveArm(shoulder, target, s);
-    // In a 3/4 push the far arm reaches past the chest, so it tucks behind the torso.
-    const farPush = pose === 'push' && s === -fr.faceDir && fr.faceAmt > 0.3;
+    // In the pushing profile the far arm passes behind the torso.
+    const farPush = pose === 'push' && fr.push > 0.5 && s === fr.walkDir;
     return { s, pose, shoulder, elbow, wrist, front: !RESTING_ARMS.includes(pose) && !farPush };
   });
 }
@@ -1037,7 +1035,8 @@ function drawHand(ctx: CanvasRenderingContext2D, look: HumanLook, arm: ArmSolve)
 /** Plastic minimarket bag hanging from the hand (prop layer). */
 function drawBag(ctx: CanvasRenderingContext2D, arm: ArmSolve, frame: number): void {
   const [x, y] = arm.wrist;
-  const sway = Math.sin(frame * 0.12) * 0.06;
+  // Slow pendulum swing (loop-periodic) with a small secondary wobble.
+  const sway = loopWave(frame, 21, 0.6) * 0.09 + loopWave(frame, 53, 1.9) * 0.025;
   ctx.save();
   ctx.translate(x, y + 10);
   ctx.rotate(sway);
@@ -1268,7 +1267,7 @@ function drawHairFront(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pos
   }
 }
 
-function drawHat(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, back: boolean): void {
+function drawHat(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose): void {
   const W = HEAD_HALF_W;
   const H = HEAD_HALF_H;
   if (look.hair === 'cap') {
@@ -1284,11 +1283,6 @@ function drawHat(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, bac
       look.hatColor,
       HEAD_INK,
     );
-    if (back) {
-      // Snapback strap instead of the bill.
-      filled(ctx, () => ctx.roundRect(-W * 0.3, by - 34, W * 0.6, 26, 12), shade(look.hatColor, -0.25), 6);
-      return;
-    }
     // Panel seams + button + white badge.
     ctx.strokeStyle = shade(look.hatColor, -0.3);
     ctx.lineWidth = 6;
@@ -1333,36 +1327,6 @@ function drawHat(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, bac
       ctx.stroke();
     }
   }
-}
-
-function drawShades(ctx: CanvasRenderingContext2D, lx: number, rx: number, y: number, sL: number, sR: number): void {
-  // Chunky beach sunglasses: dark lenses with a sky reflection and a plum frame.
-  for (const [x, s] of [
-    [lx, sL],
-    [rx, sR],
-  ] as const) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(x - 62 * s, y - 40, 124 * s, 84, [18, 18, 42, 42]);
-    const g = ctx.createLinearGradient(0, y - 40, 0, y + 44);
-    g.addColorStop(0, '#3b2a4a');
-    g.addColorStop(1, '#120a18');
-    ctx.fillStyle = g;
-    ctx.fill();
-    ink(ctx, 10);
-    ctx.clip();
-    ctx.strokeStyle = 'rgba(160, 220, 255, 0.55)';
-    ctx.lineWidth = 12;
-    ctx.beginPath();
-    ctx.moveTo(x - 40 * s, y + 30);
-    ctx.lineTo(x + 6 * s, y - 40);
-    ctx.stroke();
-    ctx.restore();
-  }
-  ctx.beginPath();
-  ctx.moveTo(lx + 60 * sL, y - 18);
-  ctx.quadraticCurveTo((lx + rx) / 2, y - 34, rx - 60 * sR, y - 18);
-  ink(ctx, 11);
 }
 
 function drawGlasses(ctx: CanvasRenderingContext2D, lx: number, rx: number, y: number): void {
@@ -1422,32 +1386,6 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
   const rx = fx + spacing;
   const mouthY = eyeY + 118;
 
-  if (pose.back) {
-    // Walking away: nape + hair mass, no face.
-    const W = HEAD_HALF_W;
-    const H = HEAD_HALF_H;
-    ctx.beginPath();
-    ctx.moveTo(-W - 20, H * 0.32);
-    for (let k = 0; k <= 8; k++) ctx.lineTo(-W + (2 * W * k) / 8, H * (k % 2 ? 0.42 : 0.3));
-    ctx.lineTo(W + 20, H * 0.32);
-    ctx.lineTo(W + 20, -H - 40);
-    ctx.lineTo(-W - 20, -H - 40);
-    ctx.closePath();
-    ctx.fillStyle = look.hair === 'professor' ? look.hairColor : shade(look.hairColor, 0.05);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 230, 210, 0.18)';
-    ctx.lineWidth = 14;
-    ctx.beginPath();
-    ctx.arc(-W * 0.15, -H * 0.1, W * 0.7, Math.PI * 1.1, Math.PI * 1.5);
-    ctx.stroke();
-    ctx.restore();
-    traceBeanHead(ctx);
-    ink(ctx, HEAD_INK);
-    for (const s of SIGN) filled(ctx, () => ctx.ellipse(s * (W + 6), H * 0.1, 22, 36, 0, 0, Math.PI * 2), look.skinShade, 6);
-    drawHat(ctx, look, pose, true);
-    ctx.restore();
-    return;
-  }
   // Blush.
   ctx.fillStyle = `rgba(222, 104, 108, ${0.26 + pose.smile * 0.12})`;
   ctx.beginPath();
@@ -1474,10 +1412,9 @@ function drawHead(ctx: CanvasRenderingContext2D, look: HumanLook, pose: Pose, fr
   traceBeanHead(ctx);
   ink(ctx, HEAD_INK);
   if (look.glasses) drawGlasses(ctx, lx, rx, eyeY);
-  if (look.shades) drawShades(ctx, lx, rx, eyeY, sL, sR);
   drawBrow(ctx, look.browColor, lx, eyeY, -1, pose, sL);
   drawBrow(ctx, look.browColor, rx, eyeY, 1, pose, sR);
-  drawHat(ctx, look, pose, false);
+  drawHat(ctx, look, pose);
   if (look.hair === 'short') {
     // Cowlick.
     ctx.beginPath();
@@ -1608,96 +1545,60 @@ export function paintCharacter(ctx: CanvasRenderingContext2D, look: Look, drive:
   if (look.kind === 'cat') {
     drawCat(ctx, look, drive.frame, seed, drive);
   } else {
-    drawHuman(ctx, look, drive, seed, 'stand');
-  }
-  applyGrain(ctx);
-}
-
-/** Crowd postures: standing, sitting with knees up, lounging with legs out. */
-export type ExtraPosture = 'stand' | 'sit' | 'lounge';
-
-/** Seat height (card px above SOLE) for seated extras. */
-const SEAT_Y = SOLE - 96;
-
-function drawHuman(ctx: CanvasRenderingContext2D, look: HumanLook, drive: ToonDrive, seed: number, posture: ExtraPosture): void {
-  const pose = poseFor(drive, seed);
-  let fr = frameFor(pose, drive);
-  if (posture !== 'stand') {
-    const drop = SEAT_Y - fr.hipY;
-    fr = { ...fr, top: fr.top + drop, hipY: fr.hipY + drop, headY: fr.headY + drop };
-  }
-  // Weight shift pivots at the soles so the feet stay planted; walking and
-  // pushing lean the whole body into the direction it faces.
-  const lean = (fr.walking ? fr.faceDir * 0.05 : 0) + fr.faceDir * 0.12 * pose.push * Math.max(fr.faceAmt, 0.4);
-  ctx.translate(LW / 2 + pose.shiftX, SOLE);
-  ctx.rotate(pose.shiftRot + lean);
-  ctx.translate(-LW / 2, -SOLE);
-  // A 3/4 turn narrows the body a little so it reads as turned, not flat.
-  const squash = 1 - 0.13 * fr.faceAmt;
-  const body = (fn: () => void): void => {
-    ctx.save();
-    ctx.translate(fr.cx, 0);
-    ctx.scale(squash, 1);
-    ctx.translate(-fr.cx, 0);
-    fn();
-    ctx.restore();
-  };
-  const arms = armsFor(drive, fr, seed);
-  body(() => {
-    for (const arm of arms) {
-      if (!arm.front) {
-        drawArm(ctx, look, arm, drive);
-        drawHand(ctx, look, arm);
+    const pose = poseFor(drive, seed);
+    const fr = frameFor(pose, drive);
+    // Weight shift pivots at the soles so the feet stay planted.
+    ctx.translate(LW / 2 + pose.shiftX, SOLE);
+    ctx.rotate(pose.shiftRot + (fr.walking ? fr.walkDir * 0.05 : 0));
+    ctx.translate(-LW / 2, -SOLE);
+    const arms = armsFor(drive, fr, seed);
+    if (fr.push > 0.01) {
+      // Pushing profile: legs stay planted, the upper body leans 18° into the
+      // handle, pivoting at the hips; torso narrows to a 3/4 side view.
+      drawLegs(ctx, look, fr, drive);
+      ctx.save();
+      ctx.translate(fr.cx, fr.hipY + 10);
+      ctx.rotate(fr.walkDir * PUSH_LEAN * fr.push);
+      ctx.translate(-fr.cx, -(fr.hipY + 10));
+      for (const arm of arms) {
+        if (!arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+        }
+      }
+      ctx.save();
+      ctx.translate(fr.cx, 0);
+      ctx.scale(1 - 0.2 * fr.push, 1);
+      ctx.translate(-fr.cx, 0);
+      drawTorso(ctx, look, fr, drive, seed);
+      ctx.restore();
+      drawHead(ctx, look, pose, fr, drive);
+      for (const arm of arms) {
+        if (arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+        }
+      }
+      ctx.restore();
+    } else {
+      for (const arm of arms) {
+        if (!arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+        }
+      }
+      drawLegs(ctx, look, fr, drive);
+      drawTorso(ctx, look, fr, drive, seed);
+      drawHead(ctx, look, pose, fr, drive);
+      for (const arm of arms) {
+        if (arm.front) {
+          drawArm(ctx, look, arm, drive);
+          drawHand(ctx, look, arm);
+          if (arm.pose === 'bag') drawBag(ctx, arm, drive.frame);
+        }
       }
     }
-    if (posture === 'stand') drawLegs(ctx, look, fr, drive);
-    else drawSeatedLegs(ctx, look, fr, posture);
-    drawTorso(ctx, look, fr, drive, seed);
-  });
-  drawHead(ctx, look, pose, fr, drive);
-  body(() => {
-    for (const arm of arms) {
-      if (arm.front) {
-        drawArm(ctx, look, arm, drive);
-        drawHand(ctx, look, arm);
-        if (arm.pose === 'bag') drawBag(ctx, arm, drive.frame);
-      }
-    }
-  });
-}
-
-/** Seated legs on a towel: knees up (`sit`) or stretched toward camera (`lounge`). */
-function drawSeatedLegs(ctx: CanvasRenderingContext2D, look: HumanLook, fr: Frame, posture: 'sit' | 'lounge'): void {
-  const width = isBeach(look) ? 30 : 46;
-  for (const s of SIGN) {
-    const hip: Pt = [fr.cx + s * 36, fr.hipY + 10];
-    const knee: Pt = posture === 'sit' ? [fr.cx + s * 92, fr.hipY - 62] : [fr.cx + s * 70, fr.hipY + 34];
-    const ankle: Pt = posture === 'sit' ? [fr.cx + s * 104, ANKLE_Y - 4] : [fr.cx + s * 128, ANKLE_Y + 2];
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(hip[0], hip[1]);
-    ctx.lineTo(knee[0], knee[1]);
-    ctx.lineTo(ankle[0], ankle[1]);
-    ctx.strokeStyle = PLUM;
-    ctx.lineWidth = width + 9;
-    ctx.stroke();
-    ctx.strokeStyle = isBeach(look) ? look.skin : look.bottomColor;
-    ctx.lineWidth = width;
-    ctx.stroke();
-    if (posture === 'sit') {
-      // Kneecap highlight sells the raised knee.
-      ctx.fillStyle = 'rgba(255, 240, 220, 0.35)';
-      ctx.beginPath();
-      ctx.ellipse(knee[0], knee[1] + 6, 10, 7, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    drawShoe(ctx, look, ankle[0] + s * 8, SOLE, s);
   }
-  drawSeat(ctx, look, fr);
-}
-
-function applyGrain(ctx: CanvasRenderingContext2D): void {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   // source-atop keeps grain inside painted pixels so the alpha cut-out survives.
   ctx.globalCompositeOperation = 'source-atop';
@@ -1707,91 +1608,6 @@ function applyGrain(ctx: CanvasRenderingContext2D): void {
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   }
   ctx.globalCompositeOperation = 'source-over';
-}
-
-// ── Unified Bean-Head extras (beach crowd, cashiers) ────────────────────────
-
-export interface ExtraSpec {
-  look: HumanLook;
-  posture: ExtraPosture;
-  expression: Expression;
-  armL: ArmPose;
-  armR: ArmPose;
-  /** Head / eye bias −1 … +1. */
-  look3: number;
-  /** Frame used for blinks/breath so each extra is caught in its own moment. */
-  frame: number;
-  seed: number;
-}
-
-/**
- * Paints a still Bean-Head extra on a card with the same rig, ink, grain and
- * SOLE floor line as the hero cast, so the crowd shares one cartoon world.
- */
-export function paintExtra(ctx: CanvasRenderingContext2D, spec: ExtraSpec, light: ToonDrive['light']): void {
-  const k = ctx.canvas.width / LW;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.setTransform(k, 0, 0, k, 0, 0);
-  const hold = <T,>(v: T): Blend<T> => ({ from: v, to: v, mix: 0 });
-  const drive: ToonDrive = {
-    frame: spec.frame,
-    expression: hold(spec.expression),
-    armL: hold(spec.armL),
-    armR: hold(spec.armR),
-    speaking: false,
-    look: spec.look3,
-    walkPhase: null,
-    walkDir: 1,
-    facing: FACE_CAMERA,
-    light,
-    viseme: REST,
-  };
-  drawHuman(ctx, spec.look, drive, spec.seed, spec.posture);
-  applyGrain(ctx);
-}
-
-const EXTRA_SKIN: readonly (readonly [string, string])[] = [
-  ['#f6cfb2', '#dba98a'],
-  ['#eab896', '#cc9574'],
-  ['#d9a07a', '#b47b58'],
-  ['#c48a63', '#a06a48'],
-  ['#a86d4a', '#86523a'],
-];
-const EXTRA_TOPS = ['#fb923c', '#f472b6', '#38bdf8', '#a3e635', '#facc15', '#c084fc', '#f87171', '#2dd4bf', '#fde68a', '#60a5fa'];
-const EXTRA_BOTTOMS = ['#0ea5e9', '#f43f5e', '#16a34a', '#7c3aed', '#f59e0b', '#1e3a8a', '#db2777'];
-const EXTRA_HATS = ['#e9c77b', '#fef3c7', '#f9a8d4', '#fdba74', '#bae6fd'];
-const EXTRA_HAIR = ['#21140f', '#3b2416', '#5a3a22', '#2a1b17', '#7a4a2a'];
-
-/** Deterministic, colourful beach-tourist look for crowd variant `i`. */
-export function beachExtraLook(i: number): HumanLook {
-  const pick = <T,>(arr: readonly T[], salt: number): T => arr[Math.floor(hash01(salt, i) * arr.length) % arr.length] as T;
-  const [skin, skinShade] = pick(EXTRA_SKIN, 901);
-  const hairColor = pick(EXTRA_HAIR, 902);
-  const hairRoll = hash01(903, i);
-  const hair: Hair = hairRoll < 0.5 ? 'sunhat' : hairRoll < 0.78 ? 'cap' : 'short';
-  const top: Top = hash01(904, i) < 0.6 ? 'hawaiian' : 'polo';
-  return {
-    kind: 'human',
-    skin,
-    skinShade,
-    hair,
-    hairColor,
-    browColor: hairColor,
-    hatColor: hair === 'cap' ? pick(EXTRA_TOPS, 905) : pick(EXTRA_HATS, 906),
-    top,
-    topColor: pick(EXTRA_TOPS, 907),
-    topAccent: hash01(908, i) < 0.5 ? '#fef3c7' : '#ffffff',
-    shortSleeve: true,
-    apron: false,
-    bottomColor: pick(EXTRA_BOTTOMS, 909),
-    shoeUpper: pick(['#a16207', '#1d4ed8', '#be123c', '#15803d'], 910),
-    shoeAccent: '#fde68a',
-    glasses: false,
-    mustache: hash01(911, i) > 0.85,
-    shades: hash01(912, i) < 0.45,
-    beach: true,
-  };
 }
 
 // ── Lit billboard actor ─────────────────────────────────────────────────────
@@ -1889,20 +1705,9 @@ export interface ActorUpdate {
   look: number;
   walkPhase: number | null;
   walkDir: number;
-  facing: Facing;
   light: ToonDrive['light'];
   /** Self-illumination (from the colour script) so faces read at night. */
   glow: number;
-}
-
-/**
- * Top-down compensation: a vertical card seen from a drone reads paper-thin, so
- * it leans back (pivoting at the soles) toward a high camera. Zero at eye level.
- */
-export function billboardPitch(camera: THREE.Vector3, at: THREE.Vector3, scale: number): number {
-  const dy = camera.y - (at.y + ACTOR_PLANE_HEIGHT * 0.45 * scale);
-  const elev = Math.atan2(dy, Math.hypot(camera.x - at.x, camera.z - at.z));
-  return smoothstep(0.3, 1.0, elev) * Math.min(elev, 1.2) * 0.85;
 }
 
 /**
@@ -1979,8 +1784,14 @@ export class ToonActor {
     }
     this.card.material.emissiveIntensity = u.glow;
     this.mesh.getWorldPosition(this.world);
-    const yaw = Math.atan2(camera.x - this.world.x, camera.z - this.world.z) - this.mesh.rotation.y;
-    this.card.rotation.set(-billboardPitch(camera, this.world, this.mesh.scale.y), yaw, 0, 'YXZ');
+    // Yaw-only billboard: the card ALWAYS stands perpendicular to the ground
+    // (no pitch / roll), so characters never lie back toward the sky.
+    this.card.rotation.set(0, Math.atan2(camera.x - this.world.x, camera.z - this.world.z) - this.mesh.rotation.y, 0);
+    // Soft oval drop shadow stretches along the stride / push stance.
+    const push = pushWeight(u);
+    const cat = this.look.kind === 'cat';
+    this.blob.scale.set((cat ? 0.5 : 0.78) * (1 + push * 0.45), 1, cat ? 0.32 : 0.42);
+    this.blob.position.x = (u.walkDir < 0 ? -1 : 1) * push * 0.12;
   }
 
   dispose(): void {
