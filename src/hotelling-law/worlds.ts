@@ -454,11 +454,23 @@ function posterPaint(text: string, sub: string, bg: string, fg: string): Paint {
     g.fillStyle = bg;
     g.fillRect(0, 0, w, h);
     g.fillStyle = fg;
-    g.font = `900 ${h * 0.34}px ${SIGN_FONT}`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
+    const maxW = w - 24;
+    let textSz = Math.round(h * 0.28);
+    g.font = `900 ${textSz}px ${SIGN_FONT}`;
+    while (g.measureText(text).width > maxW && textSz > 16) {
+      textSz -= 2;
+      g.font = `900 ${textSz}px ${SIGN_FONT}`;
+    }
     g.fillText(text, w / 2, h * 0.38);
-    g.font = `800 ${h * 0.16}px ${SIGN_FONT}`;
+
+    let subSz = Math.round(h * 0.14);
+    g.font = `800 ${subSz}px ${SIGN_FONT}`;
+    while (g.measureText(sub).width > maxW && subSz > 12) {
+      subSz -= 2;
+      g.font = `800 ${subSz}px ${SIGN_FONT}`;
+    }
     g.fillText(sub, w / 2, h * 0.74);
     g.strokeStyle = fg;
     g.lineWidth = 6;
